@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  RESCHEDULED
+  REJECTED
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
+enum NotificationChannel {
+  IN_APP
+  WHATSAPP
+  EMAIL
+}
+
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  PROCESSING
+  READ
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  RESCHEDULED
+  CANCELLED
+}
+
+model AdminUser {
+  id            String         @id @default(cuid())
+  name          String
+  email         String         @unique
+  passwordHash  String
+  active        Boolean        @default(true)
+  payments      Payment[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Mall {
+  id        String           @id @default(cuid())
+  name      String           @unique
+  location  String?
+  active    Boolean          @default(true)
+  companies Company[]
+  requests  PaymentRequest[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([active])
+}
+
+model Company {
+  id           String           @id @default(cuid())
+  name         String
+  contactName  String?
+  phone        String?
+  email        String?
+  mallId       String
+  active       Boolean          @default(true)
+  mall         Mall             @relation(fields: [mallId], references: [id], onDelete: Restrict)
+  tokens       CompanyToken[]
+  requests     PaymentRequest[]
+  appointments Appointment[]
+  payments     Payment[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([name, mallId])
+  @@index([mallId, name])
+  @@index([active, mallId])
+}
+
+model CompanyToken {
+  id              String           @id @default(cuid())
+  tokenHash       String           @unique
+  companyId       String
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdRequests PaymentRequest[]
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime         @default(now())
+
+  @@index([companyId, revokedAt])
+}
+
+model PaymentRequest {
+  id                      String         @id @default(cuid())
+  reference               String         @unique @default(cuid())
+  companyId               String
+  company                 Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  mallId                  String
+  mall                    Mall           @relation(fields: [mallId], references: [id], onDelete: Restrict)
+  amount                  Decimal        @db.Decimal(14, 2)
+  currency                String         @default("IQD")
+  requestedAt             DateTime       @default(now())
+  dueAt                   DateTime?
+  appointmentAt           DateTime?
+  status                  RequestStatus  @default(PENDING)
+  note                    String?
+  representativeName      String?
+  representativePhone     String?
+  idempotencyKey          String?        @unique
+  idempotencyFingerprint  String?        @db.Char(64)
+  createdByCompanyTokenId String?
+  createdByCompanyToken   CompanyToken?  @relation(fields: [createdByCompanyTokenId], references: [id], onDelete: SetNull)
+  appointments            Appointment[]
+  payments                Payment[]
+  notifications           Notification[]
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  @@index([status, dueAt])
+  @@index([mallId, requestedAt])
+  @@index([companyId, requestedAt])
+  @@index([createdAt])
+  @@index([requestedAt])
+}
+
+model Appointment {
+  id          String            @id @default(cuid())
+  companyId   String
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requestId   String?
+  request     PaymentRequest?   @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  scheduledAt DateTime
+  status      AppointmentStatus @default(SCHEDULED)
+  note        String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([scheduledAt, status])
+  @@index([companyId, scheduledAt])
+  @@index([requestId, status])
+}
+
+model Payment {
+  id             String         @id @default(cuid())
+  companyId      String
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  requestId      String
+  request        PaymentRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  amount         Decimal        @db.Decimal(14, 2)
+  idempotencyKey String?        @unique
+  paidAt         DateTime       @default(now())
+  method         PaymentMethod
+  notes          String?
+  adminId        String
+  admin          AdminUser      @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([companyId, paidAt])
+  @@index([requestId, paidAt])
+}
+
+model Notification {
+  id                String              @id @default(cuid())
+  requestId         String?
+  request           PaymentRequest?     @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  adminId           String?
+  admin             AdminUser?          @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  channel           NotificationChannel @default(IN_APP)
+  deliveryStatus    DeliveryStatus      @default(QUEUED)
+  recipient         String?
+  message           String
+  dedupeKey         String              @unique
+  attempts          Int                 @default(0)
+  lastError         String?
+  providerMessageId String?             @unique
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([deliveryStatus, channel, createdAt])
+}
+
+model WhatsAppStatusEvent {
+  id                String         @id @default(cuid())
+  providerMessageId String
+  status            DeliveryStatus
+  eventAt           DateTime
+  errorMessage      String?
+  dedupeKey         String         @unique @db.Char(64)
+  processedAt       DateTime?
+  createdAt         DateTime       @default(now())
+
+  @@index([providerMessageId, processedAt, eventAt])
+  @@index([createdAt])
+}
+
+model RateLimitBucket {
+  key             String   @id
+  windowStartedAt DateTime
+  count           Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+model AuditLog {
+  id         String     @id @default(cuid())
+  adminId    String?
+  admin      AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime   @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([adminId, createdAt])
+}
