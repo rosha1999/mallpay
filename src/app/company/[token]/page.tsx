@@ -4,16 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { phoneNumberSchema } from "@/lib/phone";
 
-type CompanyOption = { id: string; name: string; mall: string };
-type Info = {
-  company: { name: string; mall: string } | null;
-  companies?: CompanyOption[];
-};
+type Info = { company: { name: string; mall: string } | null };
 
 export default function PublicCompanyPage() {
   const { token } = useParams<{ token: string }>();
   const [info, setInfo] = useState<Info | null>(null);
-  const [companyId, setCompanyId] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(true);
@@ -36,7 +32,7 @@ export default function PublicCompanyPage() {
   useEffect(() => {
     let active = true;
     idempotencyKey.current = null;
-    setCompanyId("");
+    setCompanyName("");
     setRetryLocked(false);
 
     try {
@@ -49,19 +45,26 @@ export default function PublicCompanyPage() {
           phone?: unknown;
           amount?: unknown;
           companyId?: unknown;
+          companyName?: unknown;
         };
 
+        const savedCompanyName =
+          typeof saved.companyName === "string" ? saved.companyName : undefined;
+        const legacyCompanySelection =
+          typeof saved.companyId === "string" && savedCompanyName === undefined;
         if (
           typeof saved.key === "string" &&
           typeof saved.phone === "string" &&
-          typeof saved.amount === "string"
+          typeof saved.amount === "string" &&
+          !legacyCompanySelection
         ) {
           idempotencyKey.current = saved.key;
           setPhone(saved.phone);
           setAmount(saved.amount);
-          if (typeof saved.companyId === "string")
-            setCompanyId(saved.companyId);
+          if (savedCompanyName) setCompanyName(savedCompanyName);
           setRetryLocked(true);
+        } else {
+          clearPendingStorage();
         }
       }
     } catch {
@@ -90,8 +93,8 @@ export default function PublicCompanyPage() {
     e.preventDefault();
 
     if (submitLock.current || !info) return;
-    if (!info.company && !companyId) {
-      setError("اختر الشركة التي تريد إرسال الطلب لها.");
+    if (!info.company && companyName.trim().length < 2) {
+      setError("اكتب اسم الشركة التي تريد إرسال الطلب لها.");
       return;
     }
 
@@ -119,7 +122,7 @@ export default function PublicCompanyPage() {
           key: idempotencyKey.current,
           phone: normalizedPhone.data,
           amount,
-          ...(info.company ? {} : { companyId }),
+          ...(info.company ? {} : { companyName: companyName.trim() }),
         }),
       );
     } catch {
@@ -139,7 +142,7 @@ export default function PublicCompanyPage() {
           body: JSON.stringify({
             phone: normalizedPhone.data,
             amount,
-            ...(info.company ? {} : { companyId }),
+            ...(info.company ? {} : { companyName: companyName.trim() }),
             idempotencyKey: idempotencyKey.current,
           }),
         },
@@ -211,6 +214,9 @@ export default function PublicCompanyPage() {
               <p>
                 رقم الطلب: <b>{reference.slice(0, 10)}</b>
               </p>
+              <p>
+                الشركة: <b>{info.company?.name ?? companyName.trim()}</b>
+              </p>
               <p className="muted">
                 ستقوم الإدارة بمراجعة المبلغ وتحديد الموعد، ثم يصلك إشعار عند
                 اعتماده.
@@ -234,53 +240,20 @@ export default function PublicCompanyPage() {
                   </div>
                 </>
               ) : (
-                <>
-                  <div className="field">
-                    <label htmlFor="company-id">الشركة *</label>
-                    <select
-                      id="company-id"
-                      required
-                      disabled={busy || retryLocked}
-                      value={companyId}
-                      onChange={(e) => setCompanyId(e.target.value)}
-                    >
-                      <option value="">اختر الشركة</option>
-                      {retryLocked &&
-                        companyId &&
-                        !info.companies?.some(
-                          (company) => company.id === companyId,
-                        ) && (
-                          <option value={companyId}>
-                            الشركة المحددة للطلب السابق
-                          </option>
-                        )}
-                      {info.companies?.map((company) => (
-                        <option key={company.id} value={company.id}>
-                          {company.name} — {company.mall}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {companyId && (
-                    <div className="field">
-                      <label htmlFor="mall-name">المول</label>
-                      <input
-                        id="mall-name"
-                        value={
-                          info.companies?.find(
-                            (company) => company.id === companyId,
-                          )?.mall ?? ""
-                        }
-                        readOnly
-                      />
-                    </div>
-                  )}
-                  {!info.companies?.length && (
-                    <p className="muted">
-                      لا توجد شركات فعّالة لاختيارها حالياً.
-                    </p>
-                  )}
-                </>
+                <div className="field">
+                  <label htmlFor="company-name">اسم الشركة *</label>
+                  <input
+                    id="company-name"
+                    required
+                    minLength={2}
+                    maxLength={120}
+                    disabled={busy || retryLocked}
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    placeholder="اكتب اسم الشركة"
+                    autoComplete="organization"
+                  />
+                </div>
               )}
 
               <div className="field">
@@ -325,7 +298,7 @@ export default function PublicCompanyPage() {
 
               <button
                 className="btn"
-                disabled={busy || (!info.company && !info.companies?.length)}
+                disabled={busy}
               >
                 {busy
                   ? "جارٍ إرسال الطلب…"

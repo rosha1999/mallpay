@@ -18,8 +18,9 @@ type Row = {
   appointmentAt: string | null;
   note: string | null;
   status: string;
-  company: { name: string };
-  mall: { name: string };
+  companyName: string | null;
+  company: { name: string } | null;
+  mall: { name: string } | null;
   payments: { amount: string }[];
 };
 type RequestPage = { rows: Row[]; total: number; page: number; pageCount: number };
@@ -466,8 +467,8 @@ export default function Requests() {
                   return (
                     <tr key={row.id}>
                       <td>{row.reference.slice(0, 8)}</td>
-                      <td>{row.company.name}</td>
-                      <td>{row.mall.name}</td>
+                      <td>{row.companyName ?? row.company?.name ?? "غير محدد"}</td>
+                      <td>{row.mall?.name ?? "غير محدد"}</td>
                       <td>{money(row.amount)}</td>
                       <td>{money(paidAmount(row))}</td>
                       <td>
@@ -578,7 +579,7 @@ export default function Requests() {
             <form onSubmit={(event) => void recordPayment(event)}>
               <h2 id="payment-title">تسجيل دفعة</h2>
               <p className="muted">
-                {payRow.company.name} · المطلوب {money(payRow.amount)} · المدفوع{" "}
+                {payRow.companyName ?? payRow.company?.name ?? "غير محدد"} · المطلوب {money(payRow.amount)} · المدفوع{" "}
                 {money(paidAmount(payRow))} · المتبقي {money(remaining)}
               </p>
               {error && (
@@ -692,7 +693,7 @@ export default function Requests() {
           >
             <h2 id="schedule-title">تحديد موعد الاستلام</h2>
             <p className="muted">
-              {selected.company.name} · {money(selected.amount)}
+              {selected.companyName ?? selected.company?.name ?? "غير محدد"} · {money(selected.amount)}
             </p>
             {error && (
               <p className="error" role="alert">

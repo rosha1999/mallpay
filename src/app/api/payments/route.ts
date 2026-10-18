@@ -123,14 +123,14 @@ export async function POST(request: NextRequest) {
             metadata: { requestId: paymentRequest.id, amount: data.amount },
           },
         });
-        if (paymentRequest.company.email) {
+        if (paymentRequest.company?.email) {
           await tx.notification.create({
             data: {
               requestId: paymentRequest.id,
               channel: "EMAIL",
               deliveryStatus: "QUEUED",
               recipient: paymentRequest.company.email,
-              message: `تم تسجيل دفعة ${data.amount} د.ع لطلب ${paymentRequest.reference} في ${paymentRequest.company.name}.`,
+              message: `تم تسجيل دفعة ${data.amount} د.ع لطلب ${paymentRequest.reference} في ${paymentRequest.company?.name ?? paymentRequest.companyName ?? "الشركة"}.`,
               dedupeKey: `payment:${created.id}:receipt`,
             },
           });

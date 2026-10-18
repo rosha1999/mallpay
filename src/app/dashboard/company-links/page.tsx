@@ -185,7 +185,7 @@ export default function CompanyLinks() {
     if (
       isActiveToken(globalToken) &&
       !window.confirm(
-        "إصدار رابط عام جديد سيوقف الرابط الحالي لجميع الشركات. هل تريد المتابعة؟",
+        "إصدار رابط عام جديد سيوقف الرابط الحالي. هل تريد المتابعة؟",
       )
     )
       return;
@@ -211,7 +211,7 @@ export default function CompanyLinks() {
       return;
     }
     setIssued({ scope: "all", ...data });
-    setNotice("تم إصدار رابط واحد لجميع الشركات. احفظه وشاركه مع المندوبين.");
+    setNotice("تم إصدار الرابط العام. شاركه مع المندوبين ليكتبوا اسم الشركة.");
     try {
       await load();
     } catch {
@@ -224,7 +224,7 @@ export default function CompanyLinks() {
   async function revokeGlobal() {
     if (
       !window.confirm(
-        "إلغاء الرابط العام سيمنع جميع الشركات من استخدامه. هل تريد المتابعة؟",
+        "إلغاء الرابط العام سيمنع المندوبين من استخدامه. هل تريد المتابعة؟",
       )
     )
       return;
@@ -241,7 +241,7 @@ export default function CompanyLinks() {
       setIssued((current) => (current?.scope === "all" ? null : current));
       setNotice(
         body.revoked
-          ? "تم إلغاء الرابط العام لجميع الشركات."
+          ? "تم إلغاء الرابط العام."
           : "لا يوجد رابط عام فعّال لإلغائه.",
       );
       await load();
@@ -258,7 +258,7 @@ export default function CompanyLinks() {
       await navigator.clipboard.writeText(issued.publicLink);
       setNotice(
         issued.scope === "all"
-          ? "تم نسخ الرابط العام. أرسله لممثلي جميع الشركات."
+          ? "تم نسخ الرابط العام. أرسله للمندوبين ليكتبوا اسم الشركة."
           : "تم نسخ الرابط. أرسله للمندوب واحفظه في مكان آمن.",
       );
     } catch {
@@ -269,25 +269,23 @@ export default function CompanyLinks() {
   }
 
   const globalActive = isActiveToken(globalToken);
-  const hasActiveCompanies = companies.some(
-    (company) => company.active && company.mall.active,
-  );
   const issuedLabel =
-    issued?.scope === "all" ? "جميع الشركات" : issued?.companyName ?? "";
+    issued?.scope === "all" ? "رابط عام" : issued?.companyName ?? "";
   const issuedTarget =
     issued?.scope === "all"
-      ? "لجميع الشركات"
+      ? "عام"
       : issued?.companyName
         ? `لشركة ${issued.companyName}`
         : "";
   const issuedAlt =
-    issued?.scope === "all" ? "all companies" : issued?.companyName ?? "";
+    issued?.scope === "all" ? "public request link" : issued?.companyName ?? "";
 
   return (
     <>
-      <h2 className="title">رابط الطلب لجميع الشركات</h2>
+      <h2 className="title">رابط الطلب العام</h2>
       <p className="muted">
-        رابط واحد تستخدمه جميع الشركات؛ يختار المندوب شركته عند إرسال الطلب.
+        رابط واحد لا يعرض قائمة الشركات. يكتب المندوب اسم شركته، حتى لو لم تكن
+        مسجلة؛ وسيظهر الاسم مع الطلب في لوحة التحكم.
       </p>
       {error && (
         <p className="error" role="alert">
@@ -301,7 +299,7 @@ export default function CompanyLinks() {
       )}
       <section className="panel">
         <div className="panelhead">
-          <h2>الرابط العام</h2>
+          <h2>رابط طلب عام</h2>
           <span className={`badge ${globalActive ? "green" : "red"}`}>
             {globalActive ? "فعّال" : "لا يوجد رابط عام فعّال"}
           </span>
@@ -314,14 +312,14 @@ export default function CompanyLinks() {
         <div className="tableactions">
           <button
             className="btn"
-            disabled={!!busyId || loading || !hasActiveCompanies}
+            disabled={!!busyId || loading}
             onClick={rotateGlobal}
           >
             {busyId === "global"
               ? "جارٍ إصدار الرابط..."
               : globalActive
                 ? "تدوير الرابط العام"
-                : "إصدار رابط لجميع الشركات"}
+                : "إصدار رابط عام"}
           </button>
           {globalActive && (
             <button
@@ -375,7 +373,7 @@ export default function CompanyLinks() {
           </section>
           <section className="panel">
             <div className="panelhead">
-              <h2>رابط جديد {issuedTarget}</h2>
+            <h2>رابط جديد {issuedTarget}</h2>
               <button
                 className="btn secondary"
                 onClick={() => setIssued(null)}

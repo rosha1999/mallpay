@@ -88,8 +88,8 @@ export default async function Dashboard() {
               <tbody>
                 {latest.map((r) => (
                   <tr key={r.id}>
-                    <td>{r.company.name}</td>
-                    <td>{r.mall.name}</td>
+                    <td>{r.companyName ?? r.company?.name ?? "غير محدد"}</td>
+                    <td>{r.mall?.name ?? "غير محدد"}</td>
                     <td>{money(Number(r.amount))}</td>
                     <td>
                       {r.appointmentAt

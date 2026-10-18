@@ -35,8 +35,8 @@ const pageSize = 50;
 
 function matchesExistingRequest(
   existing: {
-    companyId: string;
-    mallId: string;
+    companyId: string | null;
+    mallId: string | null;
     amount: unknown;
     dueAt: Date | null;
     appointmentAt: Date | null;

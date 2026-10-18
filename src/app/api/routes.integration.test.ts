@@ -23,10 +23,14 @@ vi.mock("@/lib/auth", () => ({ currentAdmin: vi.fn() }));
 
 import { currentAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { POST as createRequest } from "@/app/api/requests/route";
+import {
+  GET as listRequests,
+  POST as createRequest,
+} from "@/app/api/requests/route";
 import { POST as recordPayment } from "@/app/api/payments/route";
 import { POST as createPublicRequest } from "@/app/api/public/[token]/requests/route";
 import { GET as getPublicRequestPage } from "@/app/api/public/[token]/requests/route";
+import { PATCH as scheduleRequest } from "@/app/api/requests/[id]/schedule/route";
 import { PATCH as updateCompany } from "@/app/api/companies/[id]/route";
 import { POST as issueCompanyToken } from "@/app/api/companies/[id]/token/route";
 import { POST as issueAllCompaniesToken } from "@/app/api/company-links/route";
@@ -47,6 +51,7 @@ let company: { id: string };
 let otherMall: { id: string };
 let otherCompany: { id: string };
 let allCompaniesTokenId: string | undefined;
+let unlistedRequestId: string | undefined;
 let originalAppUrl: string | undefined;
 const rateLimitKeys: string[] = [];
 
@@ -129,6 +134,29 @@ integration("admin API route integration", () => {
         where: { companyId: { in: companyIds } },
       });
       await session.company.deleteMany({ where: { id: { in: companyIds } } });
+    }
+    if (unlistedRequestId) {
+      const payments = await session.payment.findMany({
+        where: { requestId: unlistedRequestId },
+        select: { id: true },
+      });
+      await session.notification.deleteMany({
+        where: { requestId: unlistedRequestId },
+      });
+      await session.auditLog.deleteMany({
+        where: {
+          entityId: {
+            in: [unlistedRequestId, ...payments.map((payment) => payment.id)],
+          },
+        },
+      });
+      await session.payment.deleteMany({ where: { requestId: unlistedRequestId } });
+      await session.appointment.deleteMany({
+        where: { requestId: unlistedRequestId },
+      });
+      await session.paymentRequest.delete({
+        where: { id: unlistedRequestId },
+      });
     }
     if (otherMall) await session.mall.delete({ where: { id: otherMall.id } });
     if (mall) await session.mall.delete({ where: { id: mall.id } });
@@ -262,15 +290,22 @@ integration("admin API route integration", () => {
         where: { idempotencyKey: body.idempotencyKey },
       }),
     ).toBe(1);
-    const mismatchedCompany = await createPublicRequest(
+    const companyNameOverride = await createPublicRequest(
       jsonRequest(`/api/public/${token}/requests`, {
         ...body,
-        companyId: otherCompany.id,
-        idempotencyKey: `public-mismatch-${suffix}`,
+        companyName: `API second company ${suffix}`,
+        idempotencyKey: `public-override-${suffix}`,
       }),
       { params: Promise.resolve({ token }) },
     );
-    expect(mismatchedCompany.status).toBe(400);
+    expect(companyNameOverride.status).toBe(201);
+    const fixedLinkRequest = await session.paymentRequest.findUniqueOrThrow({
+      where: { idempotencyKey: `public-override-${suffix}` },
+    });
+    expect(fixedLinkRequest).toMatchObject({
+      companyId: company.id,
+      companyName: `API company ${suffix}`,
+    });
     const created = await session.paymentRequest.findUniqueOrThrow({
       where: { idempotencyKey: body.idempotencyKey },
     });
@@ -308,7 +343,7 @@ integration("admin API route integration", () => {
     });
   });
 
-  it("issues a shared public link that can create requests for any active company", async () => {
+  it("hides the company list and accepts typed registered or unlisted names", async () => {
     const issuedResponse = await issueAllCompaniesToken(
       new NextRequest(`${origin}/api/company-links`, {
         method: "POST",
@@ -334,14 +369,10 @@ integration("admin API route integration", () => {
     expect(publicPage.status).toBe(200);
     const pageData = await publicPage.json();
     expect(pageData.company).toBeNull();
-    expect(pageData.companies).toContainEqual({
-      id: otherCompany.id,
-      name: `API second company ${suffix}`,
-      mall: `API second mall ${suffix}`,
-    });
+    expect(pageData).not.toHaveProperty("companies");
 
     const body = {
-      companyId: otherCompany.id,
+      companyName: `API second company ${suffix}`,
       representativeName: "Shared Link Representative",
       amount: "75.00",
       phone: "+9647701234567",
@@ -358,8 +389,85 @@ integration("admin API route integration", () => {
     expect(created).toMatchObject({
       companyId: otherCompany.id,
       mallId: otherMall.id,
+      companyName: `API second company ${suffix}`,
       createdByCompanyTokenId: tokenRow.id,
     });
+
+    const unlistedCompanyName = `Unregistered company ${suffix}`;
+    const unlistedBody = {
+      companyName: unlistedCompanyName,
+      representativeName: "Unlisted Company Representative",
+      amount: "75.00",
+      phone: "+9647701234567",
+      idempotencyKey: `public-unlisted-${suffix}`,
+    };
+    rateLimitKeys.push(
+      `public-link:${tokenRow.id}:name-${createHash("sha256")
+        .update(unlistedCompanyName.toLowerCase())
+        .digest("hex")
+        .slice(0, 24)}`,
+    );
+    const unlistedResponse = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, unlistedBody),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(unlistedResponse.status).toBe(201);
+    const unlistedResult = await unlistedResponse.json();
+    const unlistedRequest = await session.paymentRequest.findUniqueOrThrow({
+      where: { idempotencyKey: unlistedBody.idempotencyKey },
+    });
+    unlistedRequestId = unlistedRequest.id;
+    expect(unlistedRequest).toMatchObject({
+      companyId: null,
+      mallId: null,
+      companyName: unlistedCompanyName,
+    });
+    const unlistedReplay = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, unlistedBody),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(unlistedReplay.status).toBe(200);
+    expect((await unlistedReplay.json()).reference).toBe(
+      unlistedResult.reference,
+    );
+
+    const requestList = await listRequests(
+      new NextRequest(`${origin}/api/requests?page=1`),
+    );
+    const requestListData = await requestList.json();
+    expect(
+      requestListData.rows.find(
+        (row: { id: string }) => row.id === unlistedRequest.id,
+      ),
+    ).toMatchObject({
+      companyName: unlistedCompanyName,
+      company: null,
+      mall: null,
+    });
+
+    const scheduledAt = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const scheduled = await scheduleRequest(
+      jsonRequest(`/api/requests/${unlistedRequest.id}/schedule`, {
+        appointmentAt: scheduledAt,
+      }),
+      { params: Promise.resolve({ id: unlistedRequest.id }) },
+    );
+    expect(scheduled.status).toBe(200);
+    const unlistedAppointment = await session.appointment.findFirstOrThrow({
+      where: { requestId: unlistedRequest.id },
+    });
+    expect(unlistedAppointment.companyId).toBeNull();
+
+    const unlistedPayment = await recordPayment(
+      jsonRequest("/api/payments", {
+        requestId: unlistedRequest.id,
+        idempotencyKey: `payment-unlisted-${suffix}`,
+        amount: "75.00",
+        method: "CASH",
+      }),
+    );
+    expect(unlistedPayment.status).toBe(201);
+    expect((await unlistedPayment.json()).companyId).toBeNull();
   });
 
   it("disables companies and malls without restoring revoked public links", async () => {

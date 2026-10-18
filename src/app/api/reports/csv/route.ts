@@ -100,8 +100,8 @@ export async function GET(request: NextRequest) {
     const remaining = requested > paid ? requested - paid : 0n;
     return [
       row.reference,
-      row.company.name,
-      row.mall.name,
+      row.companyName ?? row.company?.name ?? "غير محدد",
+      row.mall?.name ?? "غير محدد",
       fromCents(requested),
       fromCents(paid),
       fromCents(remaining),

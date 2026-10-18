@@ -47,7 +47,7 @@ export async function PATCH(
       });
       const recipient =
         normalizePhoneNumber(existing.representativePhone ?? "") ??
-        normalizePhoneNumber(existing.company.phone ?? "");
+        normalizePhoneNumber(existing.company?.phone ?? "");
       if (
         existing.appointmentAt?.getTime() === scheduledAt.getTime() &&
         activeAppointment?.scheduledAt.getTime() === scheduledAt.getTime() &&
@@ -98,7 +98,7 @@ export async function PATCH(
           },
         });
       }
-      if (existing.company.email) {
+      if (existing.company?.email) {
         await tx.notification.create({
           data: {
             requestId: existing.id,

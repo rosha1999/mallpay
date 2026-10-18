@@ -108,10 +108,11 @@ model CompanyToken {
 model PaymentRequest {
   id                      String         @id @default(cuid())
   reference               String         @unique @default(cuid())
-  companyId               String
-  company                 Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  mallId                  String
-  mall                    Mall           @relation(fields: [mallId], references: [id], onDelete: Restrict)
+  companyId               String?
+  company                 Company?       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  mallId                  String?
+  mall                    Mall?          @relation(fields: [mallId], references: [id], onDelete: Restrict)
+  companyName             String?
   amount                  Decimal        @db.Decimal(14, 2)
   currency                String         @default("IQD")
   requestedAt             DateTime       @default(now())
@@ -140,8 +141,8 @@ model PaymentRequest {
 
 model Appointment {
   id          String            @id @default(cuid())
-  companyId   String
-  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId   String?
+  company     Company?          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   requestId   String?
   request     PaymentRequest?   @relation(fields: [requestId], references: [id], onDelete: SetNull)
   scheduledAt DateTime
@@ -157,8 +158,8 @@ model Appointment {
 
 model Payment {
   id             String         @id @default(cuid())
-  companyId      String
-  company        Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  companyId      String?
+  company        Company?       @relation(fields: [companyId], references: [id], onDelete: Restrict)
   requestId      String
   request        PaymentRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
   amount         Decimal        @db.Decimal(14, 2)

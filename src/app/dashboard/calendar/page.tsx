@@ -23,7 +23,10 @@ export default async function Calendar({
   const currentPage = Math.min(page, pageCount);
   const rows = await prisma.appointment.findMany({
     where,
-    include: { company: { include: { mall: true } } },
+    include: {
+      company: { include: { mall: true } },
+      request: { select: { companyName: true } },
+    },
     orderBy: { scheduledAt: "asc" },
     skip: (currentPage - 1) * pageSize,
     take: pageSize,
@@ -49,8 +52,8 @@ export default async function Calendar({
               {rows.map((a) => (
                 <tr key={a.id}>
                   <td>{formatBaghdadDateTime(a.scheduledAt)}</td>
-                  <td>{a.company.name}</td>
-                  <td>{a.company.mall.name}</td>
+                  <td>{a.request?.companyName ?? a.company?.name ?? "غير محدد"}</td>
+                  <td>{a.company?.mall.name ?? "غير محدد"}</td>
                   <td>
                     <span className="badge blue">مجدول</span>
                   </td>
