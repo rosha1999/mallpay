@@ -25,7 +25,12 @@ export default async function Calendar({
     where,
     include: {
       company: { include: { mall: true } },
-      request: { select: { companyName: true } },
+      request: {
+        select: {
+          companyName: true,
+          mall: { select: { name: true } },
+        },
+      },
     },
     orderBy: { scheduledAt: "asc" },
     skip: (currentPage - 1) * pageSize,
@@ -53,7 +58,9 @@ export default async function Calendar({
                 <tr key={a.id}>
                   <td>{formatBaghdadDateTime(a.scheduledAt)}</td>
                   <td>{a.request?.companyName ?? a.company?.name ?? "غير محدد"}</td>
-                  <td>{a.company?.mall.name ?? "غير محدد"}</td>
+                  <td>
+                    {a.request?.mall?.name ?? a.company?.mall.name ?? "غير محدد"}
+                  </td>
                   <td>
                     <span className="badge blue">مجدول</span>
                   </td>

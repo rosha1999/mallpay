@@ -370,9 +370,52 @@ integration("admin API route integration", () => {
     const pageData = await publicPage.json();
     expect(pageData.company).toBeNull();
     expect(pageData).not.toHaveProperty("companies");
+    expect(pageData.malls).toContainEqual({
+      id: otherMall.id,
+      name: `API second mall ${suffix}`,
+    });
+
+    const missingMallName = `Missing mall company ${suffix}`;
+    rateLimitKeys.push(
+      `public-link:${tokenRow.id}:name-${createHash("sha256")
+        .update(`null:${missingMallName.toLowerCase()}`)
+        .digest("hex")
+        .slice(0, 24)}`,
+    );
+    const missingMallResponse = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        companyName: missingMallName,
+        amount: "25.00",
+        phone: "+9647701234567",
+        idempotencyKey: `public-missing-mall-${suffix}`,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(missingMallResponse.status).toBe(400);
+
+    const inactiveMallId = randomUUID();
+    const inactiveMallName = `Inactive mall company ${suffix}`;
+    rateLimitKeys.push(
+      `public-link:${tokenRow.id}:name-${createHash("sha256")
+        .update(`${inactiveMallId}:${inactiveMallName.toLowerCase()}`)
+        .digest("hex")
+        .slice(0, 24)}`,
+    );
+    const inactiveMallResponse = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        companyName: inactiveMallName,
+        mallId: inactiveMallId,
+        amount: "25.00",
+        phone: "+9647701234567",
+        idempotencyKey: `public-inactive-mall-${suffix}`,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(inactiveMallResponse.status).toBe(400);
 
     const body = {
       companyName: `API second company ${suffix}`,
+      mallId: otherMall.id,
       representativeName: "Shared Link Representative",
       amount: "75.00",
       phone: "+9647701234567",
@@ -396,6 +439,7 @@ integration("admin API route integration", () => {
     const unlistedCompanyName = `Unregistered company ${suffix}`;
     const unlistedBody = {
       companyName: unlistedCompanyName,
+      mallId: otherMall.id,
       representativeName: "Unlisted Company Representative",
       amount: "75.00",
       phone: "+9647701234567",
@@ -403,7 +447,7 @@ integration("admin API route integration", () => {
     };
     rateLimitKeys.push(
       `public-link:${tokenRow.id}:name-${createHash("sha256")
-        .update(unlistedCompanyName.toLowerCase())
+        .update(`${otherMall.id}:${unlistedCompanyName.toLowerCase()}`)
         .digest("hex")
         .slice(0, 24)}`,
     );
@@ -419,7 +463,7 @@ integration("admin API route integration", () => {
     unlistedRequestId = unlistedRequest.id;
     expect(unlistedRequest).toMatchObject({
       companyId: null,
-      mallId: null,
+      mallId: otherMall.id,
       companyName: unlistedCompanyName,
     });
     const unlistedReplay = await createPublicRequest(
@@ -442,7 +486,7 @@ integration("admin API route integration", () => {
     ).toMatchObject({
       companyName: unlistedCompanyName,
       company: null,
-      mall: null,
+      mall: { name: `API second mall ${suffix}` },
     });
 
     const scheduledAt = new Date(Date.now() + 2 * 86_400_000).toISOString();

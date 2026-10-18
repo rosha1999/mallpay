@@ -4,17 +4,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { phoneNumberSchema } from "@/lib/phone";
 
-type Info = { company: { name: string; mall: string } | null };
+type MallOption = { id: string; name: string };
+type Info = {
+  company: { name: string; mall: string } | null;
+  malls?: MallOption[];
+};
 
 export default function PublicCompanyPage() {
   const { token } = useParams<{ token: string }>();
   const [info, setInfo] = useState<Info | null>(null);
   const [companyName, setCompanyName] = useState("");
+  const [mallId, setMallId] = useState("");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [retryLocked, setRetryLocked] = useState(false);
+  const [legacyMallRetry, setLegacyMallRetry] = useState(false);
   const [error, setError] = useState("");
   const [reference, setReference] = useState("");
   const idempotencyKey = useRef<string | null>(null);
@@ -33,7 +39,9 @@ export default function PublicCompanyPage() {
     let active = true;
     idempotencyKey.current = null;
     setCompanyName("");
+    setMallId("");
     setRetryLocked(false);
+    setLegacyMallRetry(false);
 
     try {
       const pending = sessionStorage.getItem(storageKey);
@@ -46,6 +54,7 @@ export default function PublicCompanyPage() {
           amount?: unknown;
           companyId?: unknown;
           companyName?: unknown;
+          mallId?: unknown;
         };
 
         const savedCompanyName =
@@ -62,6 +71,8 @@ export default function PublicCompanyPage() {
           setPhone(saved.phone);
           setAmount(saved.amount);
           if (savedCompanyName) setCompanyName(savedCompanyName);
+          if (typeof saved.mallId === "string") setMallId(saved.mallId);
+          else if (savedCompanyName) setLegacyMallRetry(true);
           setRetryLocked(true);
         } else {
           clearPendingStorage();
@@ -97,6 +108,10 @@ export default function PublicCompanyPage() {
       setError("اكتب اسم الشركة التي تريد إرسال الطلب لها.");
       return;
     }
+    if (!info.company && !mallId) {
+      setError("اختار المول الذي تتبع له الشركة.");
+      return;
+    }
 
     const normalizedPhone = phoneNumberSchema.safeParse(phone);
 
@@ -123,6 +138,7 @@ export default function PublicCompanyPage() {
           phone: normalizedPhone.data,
           amount,
           ...(info.company ? {} : { companyName: companyName.trim() }),
+          ...(info.company ? {} : { mallId }),
         }),
       );
     } catch {
@@ -130,6 +146,7 @@ export default function PublicCompanyPage() {
     }
 
     setRetryLocked(true);
+    setLegacyMallRetry(false);
     setBusy(true);
     setError("");
 
@@ -143,6 +160,7 @@ export default function PublicCompanyPage() {
             phone: normalizedPhone.data,
             amount,
             ...(info.company ? {} : { companyName: companyName.trim() }),
+            ...(info.company ? {} : { mallId }),
             idempotencyKey: idempotencyKey.current,
           }),
         },
@@ -159,6 +177,7 @@ export default function PublicCompanyPage() {
         ) {
           idempotencyKey.current = null;
           setRetryLocked(false);
+          setLegacyMallRetry(false);
           clearPendingStorage();
         }
 
@@ -167,6 +186,7 @@ export default function PublicCompanyPage() {
 
       idempotencyKey.current = null;
       setRetryLocked(false);
+      setLegacyMallRetry(false);
       clearPendingStorage();
       setReference(d.reference);
     } catch (e) {
@@ -176,6 +196,8 @@ export default function PublicCompanyPage() {
       setBusy(false);
     }
   }
+
+  const selectedMallName = info?.malls?.find((mall) => mall.id === mallId)?.name;
 
   return (
     <main className="public-wrap">
@@ -217,6 +239,11 @@ export default function PublicCompanyPage() {
               <p>
                 الشركة: <b>{info.company?.name ?? companyName.trim()}</b>
               </p>
+              {(info.company?.mall || selectedMallName) && (
+                <p>
+                  المول: <b>{info.company?.mall ?? selectedMallName}</b>
+                </p>
+              )}
               <p className="muted">
                 ستقوم الإدارة بمراجعة المبلغ وتحديد الموعد، ثم يصلك إشعار عند
                 اعتماده.
@@ -240,20 +267,44 @@ export default function PublicCompanyPage() {
                   </div>
                 </>
               ) : (
-                <div className="field">
-                  <label htmlFor="company-name">اسم الشركة *</label>
-                  <input
-                    id="company-name"
-                    required
-                    minLength={2}
-                    maxLength={120}
-                    disabled={busy || retryLocked}
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="اكتب اسم الشركة"
-                    autoComplete="organization"
-                  />
-                </div>
+                <>
+                  <div className="field">
+                    <label htmlFor="request-mall">المول *</label>
+                    <select
+                      id="request-mall"
+                      required
+                      disabled={busy || (retryLocked && !legacyMallRetry)}
+                      value={mallId}
+                      onChange={(e) => setMallId(e.target.value)}
+                    >
+                      <option value="">اختر المول</option>
+                      {info.malls?.map((mall) => (
+                        <option key={mall.id} value={mall.id}>
+                          {mall.name}
+                        </option>
+                      ))}
+                    </select>
+                    {!info.malls?.length && (
+                      <p className="muted">
+                        لا توجد مولات فعّالة للاختيار حالياً.
+                      </p>
+                    )}
+                  </div>
+                  <div className="field">
+                    <label htmlFor="company-name">اسم الشركة *</label>
+                    <input
+                      id="company-name"
+                      required
+                      minLength={2}
+                      maxLength={120}
+                      disabled={busy || retryLocked}
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="اكتب اسم الشركة"
+                      autoComplete="organization"
+                    />
+                  </div>
+                </>
               )}
 
               <div className="field">
@@ -298,7 +349,7 @@ export default function PublicCompanyPage() {
 
               <button
                 className="btn"
-                disabled={busy}
+                disabled={busy || (!info.company && !info.malls?.length)}
               >
                 {busy
                   ? "جارٍ إرسال الطلب…"

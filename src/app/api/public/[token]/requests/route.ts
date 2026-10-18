@@ -15,6 +15,7 @@ import { phoneNumberSchema } from "@/lib/phone";
 
 const schema = z.object({
   companyName: z.string().trim().min(2).max(120).optional(),
+  mallId: z.string().trim().min(1).max(100).optional(),
   representativeName: z.string().trim().min(2).max(120).optional(),
   amount: moneyAmountSchema,
   phone: phoneNumberSchema,
@@ -25,7 +26,9 @@ const linkWindowMs = 60 * 60 * 1000;
 function matchesExistingPublicRequest(
   existing: {
     companyId: string | null;
+    mallId: string | null;
     companyName: string | null;
+    createdByCompanyTokenId: string | null;
     amount: unknown;
     representativeName: string | null;
     representativePhone: string | null;
@@ -33,25 +36,47 @@ function matchesExistingPublicRequest(
   },
   fingerprint: string,
   companyId: string | null,
+  mallId: string | null,
   companyName: string,
   data: z.infer<typeof schema>,
 ): boolean {
+  const existingName = (existing.companyName ?? "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+  const requestedName = companyName.replace(/\s+/gu, " ").trim().toLowerCase();
+  if (
+    existingName !== requestedName &&
+    !(existing.companyId !== null && existing.companyId === companyId)
+  )
+    return false;
+
   if (existing.idempotencyFingerprint) {
-    const legacyFingerprint = payloadFingerprint({
+    const legacyCompanyFingerprint = payloadFingerprint({
       type: "public-request-v1",
-      companyId,
+      companyId: existing.companyId,
+      representativeName: data.representativeName ?? null,
+      representativePhone: data.phone,
+      amount: data.amount,
+    });
+    const typedCompanyFingerprint = payloadFingerprint({
+      type: "public-request-v2",
+      companyId: existing.companyId,
+      companyName: existing.companyName ?? companyName,
       representativeName: data.representativeName ?? null,
       representativePhone: data.phone,
       amount: data.amount,
     });
     return (
       existing.idempotencyFingerprint === fingerprint ||
-      existing.idempotencyFingerprint === legacyFingerprint
+      existing.idempotencyFingerprint === legacyCompanyFingerprint ||
+      existing.idempotencyFingerprint === typedCompanyFingerprint
     );
   }
   return (
     existing.companyId === companyId &&
-    (companyId !== null || existing.companyName === companyName) &&
+    (existing.mallId === mallId ||
+      (existing.companyId === null && existing.mallId === null)) &&
     toCents(existing.amount) === toCents(data.amount) &&
     existing.representativeName === (data.representativeName ?? null) &&
     existing.representativePhone === data.phone
@@ -97,7 +122,12 @@ export async function GET(
       },
     });
 
-  return NextResponse.json({ company: null });
+  const malls = await prisma.mall.findMany({
+    where: { active: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  return NextResponse.json({ company: null, malls });
 }
 
 export async function POST(
@@ -138,7 +168,7 @@ export async function POST(
   } catch (error) {
     return invalidInputResponse(
       error,
-      "تحقق من اسم الشركة ورقم الهاتف والمبلغ المدخل.",
+      "تحقق من اسم الشركة والمول ورقم الهاتف والمبلغ المدخل.",
     );
   }
 
@@ -153,15 +183,32 @@ export async function POST(
           name: access.company.name,
         }
       : null;
+  let mallId = targetCompany?.mallId ?? null;
   if (!access.companyId) {
     if (!submittedCompanyName)
       return NextResponse.json(
         { error: "اكتب اسم الشركة التي تريد إرسال الطلب لها." },
         { status: 400 },
       );
+    if (!data.mallId)
+      return NextResponse.json(
+        { error: "اختار المول الذي تتبع له الشركة." },
+        { status: 400 },
+      );
+    const selectedMall = await prisma.mall.findFirst({
+      where: { id: data.mallId, active: true },
+      select: { id: true },
+    });
+    if (!selectedMall)
+      return NextResponse.json(
+        { error: "المول المحدد غير موجود أو متوقف." },
+        { status: 400 },
+      );
+    mallId = selectedMall.id;
     const matches = await prisma.company.findMany({
       where: {
         name: { equals: submittedCompanyName, mode: "insensitive" },
+        mallId,
         active: true,
         mall: { is: { active: true } },
       },
@@ -172,11 +219,11 @@ export async function POST(
   }
   const companyId = targetCompany?.id ?? null;
   const companyName = targetCompany?.name ?? submittedCompanyName;
-  const mallId = targetCompany?.mallId ?? null;
+  mallId = targetCompany?.mallId ?? mallId;
 
   const companyRateKey =
     companyId ??
-    `name-${createHash("sha256").update(companyName.toLowerCase()).digest("hex").slice(0, 24)}`;
+    `name-${createHash("sha256").update(`${mallId}:${companyName.toLowerCase()}`).digest("hex").slice(0, 24)}`;
   const linkLimit = await consumeRateLimit(
     access.companyId ? `public-link:${access.id}` : `public-link:${access.id}:${companyRateKey}`,
     20,
@@ -192,8 +239,9 @@ export async function POST(
     );
 
   const fingerprint = payloadFingerprint({
-    type: "public-request-v2",
+    type: "public-request-v3",
     companyId,
+    mallId,
     companyName,
     representativeName: data.representativeName ?? null,
     representativePhone: data.phone,
@@ -204,11 +252,12 @@ export async function POST(
   });
   if (existing) {
     if (
-      existing.companyId !== companyId ||
+      existing.createdByCompanyTokenId !== access.id ||
       !matchesExistingPublicRequest(
         existing,
         fingerprint,
         companyId,
+        mallId,
         companyName,
         data,
       )
@@ -218,16 +267,22 @@ export async function POST(
         { status: 409 },
       );
     }
+    if (existing.companyId === null && existing.mallId === null && mallId) {
+      await prisma.paymentRequest.updateMany({
+        where: { id: existing.id, companyId: null, mallId: null },
+        data: { mallId },
+      });
+    }
     return NextResponse.json({ ok: true, reference: existing.reference });
   }
 
   try {
     const created = await prisma.$transaction(async (tx) => {
+      const activeMall = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Mall" WHERE "id" = ${mallId} AND "active" = true FOR SHARE
+      `;
+      if (!activeMall.length) throw new Error("LINK_INACTIVE");
       if (targetCompany) {
-        const activeMall = await tx.$queryRaw<{ id: string }[]>`
-          SELECT "id" FROM "Mall" WHERE "id" = ${targetCompany.mallId} AND "active" = true FOR SHARE
-        `;
-        if (!activeMall.length) throw new Error("LINK_INACTIVE");
         const activeCompany = await tx.$queryRaw<{ id: string }[]>`
           SELECT "id" FROM "Company"
           WHERE "id" = ${targetCompany.id}
@@ -312,15 +367,22 @@ export async function POST(
         where: { idempotencyKey: data.idempotencyKey },
       });
       if (
-        duplicate?.companyId === companyId &&
+        duplicate?.createdByCompanyTokenId === access.id &&
         matchesExistingPublicRequest(
           duplicate,
           fingerprint,
           companyId,
+          mallId,
           companyName,
           data,
         )
       ) {
+        if (duplicate.companyId === null && duplicate.mallId === null && mallId) {
+          await prisma.paymentRequest.updateMany({
+            where: { id: duplicate.id, companyId: null, mallId: null },
+            data: { mallId },
+          });
+        }
         return NextResponse.json({ ok: true, reference: duplicate.reference });
       }
       return NextResponse.json(
