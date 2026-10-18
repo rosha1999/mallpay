@@ -4,11 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { phoneNumberSchema } from "@/lib/phone";
 
-type Info = { company: { name: string; mall: string } };
+type CompanyOption = { id: string; name: string; mall: string };
+type Info = {
+  company: { name: string; mall: string } | null;
+  companies?: CompanyOption[];
+};
 
 export default function PublicCompanyPage() {
   const { token } = useParams<{ token: string }>();
   const [info, setInfo] = useState<Info | null>(null);
+  const [companyId, setCompanyId] = useState("");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(true);
@@ -31,6 +36,7 @@ export default function PublicCompanyPage() {
   useEffect(() => {
     let active = true;
     idempotencyKey.current = null;
+    setCompanyId("");
     setRetryLocked(false);
 
     try {
@@ -42,6 +48,7 @@ export default function PublicCompanyPage() {
           representativeName?: unknown;
           phone?: unknown;
           amount?: unknown;
+          companyId?: unknown;
         };
 
         if (
@@ -52,6 +59,8 @@ export default function PublicCompanyPage() {
           idempotencyKey.current = saved.key;
           setPhone(saved.phone);
           setAmount(saved.amount);
+          if (typeof saved.companyId === "string")
+            setCompanyId(saved.companyId);
           setRetryLocked(true);
         }
       }
@@ -63,7 +72,7 @@ export default function PublicCompanyPage() {
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        if (active) setInfo(d);
+        if (active) setInfo(d as Info);
       })
       .catch((e) => {
         if (active) setError(e.message || "الرابط غير صالح");
@@ -81,6 +90,10 @@ export default function PublicCompanyPage() {
     e.preventDefault();
 
     if (submitLock.current || !info) return;
+    if (!info.company && !companyId) {
+      setError("اختر الشركة التي تريد إرسال الطلب لها.");
+      return;
+    }
 
     const normalizedPhone = phoneNumberSchema.safeParse(phone);
 
@@ -106,6 +119,7 @@ export default function PublicCompanyPage() {
           key: idempotencyKey.current,
           phone: normalizedPhone.data,
           amount,
+          ...(info.company ? {} : { companyId }),
         }),
       );
     } catch {
@@ -125,6 +139,7 @@ export default function PublicCompanyPage() {
           body: JSON.stringify({
             phone: normalizedPhone.data,
             amount,
+            ...(info.company ? {} : { companyId }),
             idempotencyKey: idempotencyKey.current,
           }),
         },
@@ -203,15 +218,70 @@ export default function PublicCompanyPage() {
             </div>
           ) : (
             <form onSubmit={submit} className="public-form">
-              <div className="field">
-                <label htmlFor="company-name">الشركة</label>
-                <input id="company-name" value={info.company.name} readOnly />
-              </div>
-
-              <div className="field">
-                <label htmlFor="mall-name">المول</label>
-                <input id="mall-name" value={info.company.mall} readOnly />
-              </div>
+              {info.company ? (
+                <>
+                  <div className="field">
+                    <label htmlFor="company-name">الشركة</label>
+                    <input
+                      id="company-name"
+                      value={info.company.name}
+                      readOnly
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="mall-name">المول</label>
+                    <input id="mall-name" value={info.company.mall} readOnly />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="field">
+                    <label htmlFor="company-id">الشركة *</label>
+                    <select
+                      id="company-id"
+                      required
+                      disabled={busy || retryLocked}
+                      value={companyId}
+                      onChange={(e) => setCompanyId(e.target.value)}
+                    >
+                      <option value="">اختر الشركة</option>
+                      {retryLocked &&
+                        companyId &&
+                        !info.companies?.some(
+                          (company) => company.id === companyId,
+                        ) && (
+                          <option value={companyId}>
+                            الشركة المحددة للطلب السابق
+                          </option>
+                        )}
+                      {info.companies?.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.name} — {company.mall}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {companyId && (
+                    <div className="field">
+                      <label htmlFor="mall-name">المول</label>
+                      <input
+                        id="mall-name"
+                        value={
+                          info.companies?.find(
+                            (company) => company.id === companyId,
+                          )?.mall ?? ""
+                        }
+                        readOnly
+                      />
+                    </div>
+                  )}
+                  {!info.companies?.length && (
+                    <p className="muted">
+                      لا توجد شركات فعّالة لاختيارها حالياً.
+                    </p>
+                  )}
+                </>
+              )}
 
               <div className="field">
                 <label htmlFor="representative-phone">
@@ -253,7 +323,10 @@ export default function PublicCompanyPage() {
                 </p>
               )}
 
-              <button className="btn" disabled={busy}>
+              <button
+                className="btn"
+                disabled={busy || (!info.company && !info.companies?.length)}
+              >
                 {busy
                   ? "جارٍ إرسال الطلب…"
                   : retryLocked

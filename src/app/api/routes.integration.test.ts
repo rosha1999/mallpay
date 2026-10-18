@@ -29,6 +29,7 @@ import { POST as createPublicRequest } from "@/app/api/public/[token]/requests/r
 import { GET as getPublicRequestPage } from "@/app/api/public/[token]/requests/route";
 import { PATCH as updateCompany } from "@/app/api/companies/[id]/route";
 import { POST as issueCompanyToken } from "@/app/api/companies/[id]/token/route";
+import { POST as issueAllCompaniesToken } from "@/app/api/company-links/route";
 import { PATCH as updateMall } from "@/app/api/malls/[id]/route";
 import {
   GET as getInbox,
@@ -43,6 +44,9 @@ const session = prisma as import("@prisma/client").PrismaClient;
 let admin: { id: string; name: string; email: string };
 let mall: { id: string };
 let company: { id: string };
+let otherMall: { id: string };
+let otherCompany: { id: string };
+let allCompaniesTokenId: string | undefined;
 let originalAppUrl: string | undefined;
 const rateLimitKeys: string[] = [];
 
@@ -78,6 +82,12 @@ integration("admin API route integration", () => {
     company = await session.company.create({
       data: { name: `API company ${suffix}`, mallId: mall.id },
     });
+    otherMall = await session.mall.create({
+      data: { name: `API second mall ${suffix}` },
+    });
+    otherCompany = await session.company.create({
+      data: { name: `API second company ${suffix}`, mallId: otherMall.id },
+    });
   });
 
   beforeEach(() => {
@@ -85,9 +95,16 @@ integration("admin API route integration", () => {
   });
 
   afterAll(async () => {
-    if (company) {
+    const companyIds = [company?.id, otherCompany?.id].filter(
+      (id): id is string => Boolean(id),
+    );
+    if (allCompaniesTokenId)
+      await session.companyToken.deleteMany({
+        where: { id: allCompaniesTokenId },
+      });
+    if (companyIds.length) {
       const requests = await session.paymentRequest.findMany({
-        where: { companyId: company.id },
+        where: { companyId: { in: companyIds } },
         select: { id: true },
       });
       const requestIds = requests.map((request) => request.id);
@@ -99,12 +116,21 @@ integration("admin API route integration", () => {
           where: { entityId: { in: requestIds } },
         });
       }
-      await session.payment.deleteMany({ where: { companyId: company.id } });
-      await session.appointment.deleteMany({ where: { companyId: company.id } });
-      await session.paymentRequest.deleteMany({ where: { companyId: company.id } });
-      await session.companyToken.deleteMany({ where: { companyId: company.id } });
-      await session.company.delete({ where: { id: company.id } });
+      await session.payment.deleteMany({
+        where: { companyId: { in: companyIds } },
+      });
+      await session.appointment.deleteMany({
+        where: { companyId: { in: companyIds } },
+      });
+      await session.paymentRequest.deleteMany({
+        where: { companyId: { in: companyIds } },
+      });
+      await session.companyToken.deleteMany({
+        where: { companyId: { in: companyIds } },
+      });
+      await session.company.deleteMany({ where: { id: { in: companyIds } } });
     }
+    if (otherMall) await session.mall.delete({ where: { id: otherMall.id } });
     if (mall) await session.mall.delete({ where: { id: mall.id } });
     if (admin) {
       await session.auditLog.deleteMany({ where: { adminId: admin.id } });
@@ -236,6 +262,15 @@ integration("admin API route integration", () => {
         where: { idempotencyKey: body.idempotencyKey },
       }),
     ).toBe(1);
+    const mismatchedCompany = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        ...body,
+        companyId: otherCompany.id,
+        idempotencyKey: `public-mismatch-${suffix}`,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(mismatchedCompany.status).toBe(400);
     const created = await session.paymentRequest.findUniqueOrThrow({
       where: { idempotencyKey: body.idempotencyKey },
     });
@@ -270,6 +305,60 @@ integration("admin API route integration", () => {
     await session.companyToken.update({
       where: { id: tokenRow.id },
       data: { revokedAt: new Date() },
+    });
+  });
+
+  it("issues a shared public link that can create requests for any active company", async () => {
+    const issuedResponse = await issueAllCompaniesToken(
+      new NextRequest(`${origin}/api/company-links`, {
+        method: "POST",
+        headers: { origin },
+      }),
+    );
+    expect(issuedResponse.status).toBe(200);
+    const issued = await issuedResponse.json();
+    const token = new URL(issued.publicLink).pathname.split("/").pop()!;
+    const tokenRow = await session.companyToken.findUniqueOrThrow({
+      where: {
+        tokenHash: createHash("sha256").update(token).digest("hex"),
+      },
+    });
+    allCompaniesTokenId = tokenRow.id;
+    rateLimitKeys.push(`public-link:${tokenRow.id}:${otherCompany.id}`);
+    expect(tokenRow.companyId).toBeNull();
+
+    const publicPage = await getPublicRequestPage(
+      new NextRequest(`${origin}/api/public/${token}/requests`),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(publicPage.status).toBe(200);
+    const pageData = await publicPage.json();
+    expect(pageData.company).toBeNull();
+    expect(pageData.companies).toContainEqual({
+      id: otherCompany.id,
+      name: `API second company ${suffix}`,
+      mall: `API second mall ${suffix}`,
+    });
+
+    const body = {
+      companyId: otherCompany.id,
+      representativeName: "Shared Link Representative",
+      amount: "75.00",
+      phone: "+9647701234567",
+      idempotencyKey: `public-all-${suffix}`,
+    };
+    const response = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, body),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(response.status).toBe(201);
+    const created = await session.paymentRequest.findUniqueOrThrow({
+      where: { idempotencyKey: body.idempotencyKey },
+    });
+    expect(created).toMatchObject({
+      companyId: otherCompany.id,
+      mallId: otherMall.id,
+      createdByCompanyTokenId: tokenRow.id,
     });
   });
 

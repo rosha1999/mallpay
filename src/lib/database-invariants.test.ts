@@ -174,6 +174,34 @@ runDatabaseTests("PostgreSQL integrity constraints", () => {
     ).rejects.toThrow();
   });
 
+  it("allows a global creator token to submit for any company", async () => {
+    const token = await prisma.companyToken.create({
+      data: {
+        tokenHash: createHash("sha256")
+          .update(`${suffix}:global-token`)
+          .digest("hex"),
+        revokedAt: new Date(),
+      },
+    });
+    let createdRequestId: string | undefined;
+    try {
+      const created = await prisma.paymentRequest.create({
+        data: {
+          companyId: companyA!.id,
+          mallId: mallA!.id,
+          amount: "10.00",
+          createdByCompanyTokenId: token.id,
+        },
+      });
+      createdRequestId = created.id;
+      expect(created.companyId).toBe(companyA!.id);
+    } finally {
+      if (createdRequestId)
+        await prisma.paymentRequest.delete({ where: { id: createdRequestId } });
+      await prisma.companyToken.delete({ where: { id: token.id } });
+    }
+  });
+
   it("reconciles callbacks received before the provider ID was stored", async () => {
     const providerMessageId = `wamid.${suffix}`;
     const deliveredAt = new Date("2026-01-01T00:00:00.000Z");

@@ -55,7 +55,7 @@
 - لا تُظهر company token الخام إلا عند إنشائه؛ قاعدة البيانات تخزن hash فقط. لا تشارك روابط الشركات في سجلات عامة.
 
 ## حالة الوظائف
-الموجود: لوحة عربية RTL، تسجيل دخول المدير، طلب عام برابط شركة، قائمة طلبات بصفحات وتصفية، جدولة/إعادة جدولة/رفض بتوقيت بغداد، تسجيل دفعات جزئية دقيقة ومنع التجاوز والتكرار، سجلات تدقيق، تصدير CSV، وتحديد محاولات في PostgreSQL. يمكن تعديل الشركات والمولات وإيقافها دون حذف التاريخ؛ الإيقاف يبطل روابط الشركة. التقويم يسمح بإعادة جدولة المواعيد المرتبطة بالطلبات. إشعارات الإدارة داخل اللوحة، وإشعارات WhatsApp والبريد تُرسل من العامل بعد ضبط حسابات Meta وResend.
+الموجود: لوحة عربية RTL، تسجيل دخول المدير، طلب عام برابط شركة أو رابط مشترك لكل الشركات، قائمة طلبات بصفحات وتصفية، جدولة/إعادة جدولة/رفض بتوقيت بغداد، تسجيل دفعات جزئية دقيقة ومنع التجاوز والتكرار، سجلات تدقيق، تصدير CSV، وتحديد محاولات في PostgreSQL. يمكن تعديل الشركات والمولات وإيقافها دون حذف التاريخ؛ الإيقاف يبطل روابط الشركة. التقويم يسمح بإعادة جدولة المواعيد المرتبطة بالطلبات. إشعارات الإدارة داخل اللوحة، وإشعارات WhatsApp والبريد تُرسل من العامل بعد ضبط حسابات Meta وResend.
 
 ## فحوصات النسخة
 يتم التحقق آلياً في GitHub Actions عند push أو pull request، ويمكن تشغيله يدوياً من تبويب Actions، عبر تثبيت نظيف وفحص TypeScript وESLint والاختبارات والبناء وتطبيق migrations على PostgreSQL 16 مؤقت. الاختبارات التي تتطلب قاعدة الاختبار تُشغّل عند ضبط `TEST_DATABASE_URL`؛ يفشل إعداد Vitest في GitHub Actions إن غاب المتغير؛ لم يُختبر إرسال WhatsApp بحساب Meta.
@@ -66,7 +66,7 @@
 
 ## Public representative request flow
 
-Create a company from **Dashboard → Companies**. The API returns a one-time display of the company public link (`/company/<secure-token>`); share it with the representative or create a QR code from that URL. Links expire after 90 days. Use **Dashboard → Company Links** to rotate or revoke a link; rotation immediately disables the previous link. The representative submits their name, phone number, and requested amount only. They do not choose a date. The request is stored as pending, and an admin schedules the appointment from **Dashboard → Requests**.
+Use **Dashboard → Company Links** to issue one shared public link for all active companies. The representative selects their company, then submits their phone number and requested amount. The shared link expires after 90 days; rotating it immediately disables the previous shared link. Company-specific links remain available as an optional alternative. New links are shown once, with an optional QR code. The request is stored as pending, and an admin schedules the appointment from **Dashboard → Requests**.
 
 The schedule API stores the selected date/time, creates an appointment record, and queues WhatsApp and email notifications when recipient details exist. Delivery is **not active until Meta/Resend credentials, an approved WhatsApp template, the scheduler, and webhook settings are configured and tested**. Do not treat a queued notification as delivered.
 

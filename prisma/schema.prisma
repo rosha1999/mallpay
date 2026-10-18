@@ -95,8 +95,8 @@ model Company {
 model CompanyToken {
   id              String           @id @default(cuid())
   tokenHash       String           @unique
-  companyId       String
-  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId       String?
+  company         Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdRequests PaymentRequest[]
   expiresAt       DateTime?
   revokedAt       DateTime?

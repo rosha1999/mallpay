@@ -14,6 +14,7 @@ import { moneyAmountSchema, toCents } from "@/lib/money";
 import { phoneNumberSchema } from "@/lib/phone";
 
 const schema = z.object({
+  companyId: z.string().trim().min(1).max(100).optional(),
   representativeName: z.string().trim().min(2).max(120).optional(),
   amount: moneyAmountSchema,
   phone: phoneNumberSchema,
@@ -51,7 +52,13 @@ async function findAccess(token: string) {
     },
     include: { company: { include: { mall: true } } },
   });
-  return access?.company.active && access.company.mall.active ? access : null;
+  if (!access) return null;
+  if (
+    access.company &&
+    (!access.company.active || !access.company.mall.active)
+  )
+    return null;
+  return access;
 }
 
 export async function GET(
@@ -65,8 +72,26 @@ export async function GET(
       { error: "الرابط غير صالح أو منتهي" },
       { status: 404 },
     );
+  if (access.company)
+    return NextResponse.json({
+      company: {
+        name: access.company.name,
+        mall: access.company.mall.name,
+      },
+    });
+
+  const companies = await prisma.company.findMany({
+    where: { active: true, mall: { is: { active: true } } },
+    select: { id: true, name: true, mall: { select: { name: true } } },
+    orderBy: { name: "asc" },
+  });
   return NextResponse.json({
-    company: { name: access.company.name, mall: access.company.mall.name },
+    company: null,
+    companies: companies.map((company) => ({
+      id: company.id,
+      name: company.name,
+      mall: company.mall.name,
+    })),
   });
 }
 
@@ -86,18 +111,20 @@ export async function POST(
     );
 
   const client = clientIdentifier(request);
-  const limits = await Promise.all([
-    ...(client
-      ? [consumeRateLimit(`public-ip:${client}`, 30, 15 * 60 * 1000)]
-      : []),
-    consumeRateLimit(`public-link:${access.id}`, 20, linkWindowMs),
-  ]);
-  const blocked = limits.find((result) => !result.allowed);
-  if (blocked) {
-    return NextResponse.json(
-      { error: "تم تجاوز عدد الطلبات المسموح. حاول مرة أخرى بعد قليل." },
-      { status: 429, headers: { "Retry-After": String(blocked.retryAfter) } },
+  if (client) {
+    const ipLimit = await consumeRateLimit(
+      `public-ip:${client}`,
+      30,
+      15 * 60 * 1000,
     );
+    if (!ipLimit.allowed)
+      return NextResponse.json(
+        { error: "تم تجاوز عدد الطلبات المسموح. حاول مرة أخرى بعد قليل." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(ipLimit.retryAfter) },
+        },
+      );
   }
 
   let data: z.infer<typeof schema>;
@@ -110,9 +137,46 @@ export async function POST(
     );
   }
 
+  if (access.companyId && data.companyId && data.companyId !== access.companyId)
+    return NextResponse.json(
+      { error: "الشركة المحددة لا تطابق رابط الطلب." },
+      { status: 400 },
+    );
+  const companyId = access.companyId ?? data.companyId;
+  if (!companyId)
+    return NextResponse.json(
+      { error: "اختر الشركة التي تريد إرسال الطلب لها." },
+      { status: 400 },
+    );
+  const targetCompany = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, mallId: true, name: true },
+  });
+  if (!targetCompany)
+    return NextResponse.json(
+      { error: "الشركة المحددة غير موجودة." },
+      { status: 400 },
+    );
+
+  const linkLimit = await consumeRateLimit(
+    access.companyId
+      ? `public-link:${access.id}`
+      : `public-link:${access.id}:${companyId}`,
+    20,
+    linkWindowMs,
+  );
+  if (!linkLimit.allowed)
+    return NextResponse.json(
+      { error: "تم تجاوز عدد الطلبات المسموح. حاول مرة أخرى بعد قليل." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(linkLimit.retryAfter) },
+      },
+    );
+
   const fingerprint = payloadFingerprint({
     type: "public-request-v1",
-    companyId: access.companyId,
+    companyId,
     representativeName: data.representativeName ?? null,
     representativePhone: data.phone,
     amount: data.amount,
@@ -122,7 +186,7 @@ export async function POST(
   });
   if (existing) {
     if (
-      existing.companyId !== access.companyId ||
+      existing.companyId !== companyId ||
       !matchesExistingPublicRequest(existing, fingerprint, data)
     ) {
       return NextResponse.json(
@@ -136,12 +200,14 @@ export async function POST(
   try {
     const created = await prisma.$transaction(async (tx) => {
       const activeMall = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "Mall" WHERE "id" = ${access.company.mallId} AND "active" = true FOR SHARE
+        SELECT "id" FROM "Mall" WHERE "id" = ${targetCompany.mallId} AND "active" = true FOR SHARE
       `;
       if (!activeMall.length) throw new Error("LINK_INACTIVE");
       const activeCompany = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Company"
-        WHERE "id" = ${access.companyId} AND "active" = true
+        WHERE "id" = ${companyId}
+          AND "mallId" = ${targetCompany.mallId}
+          AND "active" = true
         FOR SHARE
       `;
       if (!activeCompany.length) throw new Error("LINK_INACTIVE");
@@ -150,14 +216,15 @@ export async function POST(
         WHERE "id" = ${access.id}
           AND "revokedAt" IS NULL
           AND ("expiresAt" IS NULL OR "expiresAt" > ${new Date()})
+          AND ("companyId" IS NULL OR "companyId" = ${companyId})
         FOR SHARE
       `;
       if (!activeToken.length) throw new Error("LINK_INACTIVE");
 
       const paymentRequest = await tx.paymentRequest.create({
         data: {
-          companyId: access.companyId,
-          mallId: access.company.mallId,
+          companyId,
+          mallId: targetCompany.mallId,
           amount: data.amount,
           dueAt: null,
           status: "PENDING",
@@ -173,7 +240,7 @@ export async function POST(
         select: { id: true, email: true },
       });
       if (admins.length) {
-        const message = `طلب جديد من ${access.company.name}`;
+        const message = `طلب جديد من ${targetCompany.name}`;
         const createdAt = new Date();
         await tx.notification.createMany({
           data: admins.flatMap((admin) => [
@@ -192,7 +259,7 @@ export async function POST(
               channel: "EMAIL" as const,
               deliveryStatus: "QUEUED" as const,
               recipient: admin.email,
-              message: `وصل طلب تسديد جديد من ${access.company.name}. رقم الطلب ${paymentRequest.reference}، المبلغ ${data.amount} د.ع.`,
+              message: `وصل طلب تسديد جديد من ${targetCompany.name}. رقم الطلب ${paymentRequest.reference}، المبلغ ${data.amount} د.ع.`,
               dedupeKey: `request:${paymentRequest.id}:email:${admin.id}:received`,
             },
           ]),
@@ -218,7 +285,7 @@ export async function POST(
         where: { idempotencyKey: data.idempotencyKey },
       });
       if (
-        duplicate?.companyId === access.companyId &&
+        duplicate?.companyId === companyId &&
         matchesExistingPublicRequest(duplicate, fingerprint, data)
       ) {
         return NextResponse.json({ ok: true, reference: duplicate.reference });
