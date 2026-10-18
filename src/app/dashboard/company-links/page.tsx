@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatBaghdadDate } from "@/lib/dates";
+import QRCode from "qrcode";
 
 type TokenInfo = {
   createdAt: string;
@@ -38,6 +39,29 @@ export default function CompanyLinks() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setQrDataUrl("");
+    if (!issued?.publicLink) return;
+
+    QRCode.toDataURL(issued.publicLink, {
+      width: 300,
+      margin: 2,
+      errorCorrectionLevel: "H",
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setError("???? ????? ??? QR. ???? ????? ??????.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issued?.publicLink]);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/companies");
@@ -160,6 +184,35 @@ export default function CompanyLinks() {
         </p>
       )}
       {issued && (
+        <>
+          <style>{`
+            @media print {
+              body * { visibility: hidden !important; }
+              .qr-print-sheet, .qr-print-sheet * { visibility: visible !important; }
+              .qr-print-sheet {
+                display: block !important;
+                position: absolute !important;
+                inset: 0 !important;
+                width: 100% !important;
+                padding: 24px !important;
+                text-align: center !important;
+                color: #000 !important;
+                background: #fff !important;
+              }
+              .qr-print-sheet img { width: 280px !important; height: 280px !important; }
+              @page { size: A4; margin: 15mm; }
+            }
+          `}</style>
+          <section className="qr-print-sheet" style={{ display: "none" }}>
+            <h1>???? ??? ??????</h1>
+            <h2>{issued.companyName}</h2>
+            {qrDataUrl && (
+              <img src={qrDataUrl} alt={`QR Code - ${issued.companyName}`} />
+            )}
+            <p>???? ????? ???? ????? ?????</p>
+            <p dir="ltr" style={{ overflowWrap: "anywhere" }}>{issued.publicLink}</p>
+            <p>????? ?????? ??????: {formatBaghdadDate(issued.expiresAt)}</p>
+          </section>
         <section className="panel">
           <div className="panelhead">
             <h2>رابط جديد لشركة {issued.companyName}</h2>
@@ -181,10 +234,30 @@ export default function CompanyLinks() {
           <p className="muted">
             ينتهي في {formatBaghdadDate(issued.expiresAt)}
           </p>
+          {qrDataUrl && (
+            <div style={{ margin: "20px 0", textAlign: "center" }}>
+              <img
+                src={qrDataUrl}
+                alt={`QR Code - ${issued.companyName}`}
+                width={220}
+                height={220}
+                style={{ display: "block", margin: "0 auto 12px" }}
+              />
+              <p className="muted">???? ????? ??????? ?????? ???? ???? ?????</p>
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => window.print()}
+              >
+                ????? ?????? ? QR
+              </button>
+            </div>
+          )}
           <button className="btn" onClick={copyLink}>
             نسخ الرابط
           </button>
         </section>
+        </>
       )}
       <section className="panel">
         <div className="tablewrap">

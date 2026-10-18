@@ -1,13 +1,14 @@
 "use client";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { phoneNumberSchema } from "@/lib/phone";
 
 type Info = { company: { name: string; mall: string } };
+
 export default function PublicCompanyPage() {
   const { token } = useParams<{ token: string }>();
   const [info, setInfo] = useState<Info | null>(null);
-  const [rep, setRep] = useState("");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,7 @@ export default function PublicCompanyPage() {
   const idempotencyKey = useRef<string | null>(null);
   const submitLock = useRef(false);
   const storageKey = `mallpay:public-request:${token}`;
+
   const clearPendingStorage = useCallback(() => {
     try {
       sessionStorage.removeItem(storageKey);
@@ -25,12 +27,15 @@ export default function PublicCompanyPage() {
       // Storage can be unavailable in privacy-restricted browser contexts.
     }
   }, [storageKey]);
+
   useEffect(() => {
     let active = true;
     idempotencyKey.current = null;
     setRetryLocked(false);
+
     try {
       const pending = sessionStorage.getItem(storageKey);
+
       if (pending) {
         const saved = JSON.parse(pending) as {
           key?: unknown;
@@ -38,14 +43,13 @@ export default function PublicCompanyPage() {
           phone?: unknown;
           amount?: unknown;
         };
+
         if (
           typeof saved.key === "string" &&
-          typeof saved.representativeName === "string" &&
           typeof saved.phone === "string" &&
           typeof saved.amount === "string"
         ) {
           idempotencyKey.current = saved.key;
-          setRep(saved.representativeName);
           setPhone(saved.phone);
           setAmount(saved.amount);
           setRetryLocked(true);
@@ -54,6 +58,7 @@ export default function PublicCompanyPage() {
     } catch {
       clearPendingStorage();
     }
+
     fetch(`/api/public/${encodeURIComponent(token)}/requests`)
       .then(async (r) => {
         const d = await r.json();
@@ -66,31 +71,39 @@ export default function PublicCompanyPage() {
       .finally(() => {
         if (active) setLoading(false);
       });
+
     return () => {
       active = false;
     };
   }, [clearPendingStorage, storageKey, token]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+
     if (submitLock.current || !info) return;
-    if (rep.trim().length < 2) {
-      setError("اكتب اسم المندوب بحرفين على الأقل.");
-      return;
-    }
-    const representativeName = rep.trim();
+
     const normalizedPhone = phoneNumberSchema.safeParse(phone);
+
     if (!normalizedPhone.success) {
-      setError("أدخل رقماً عراقياً يبدأ بـ07 أو رقماً دولياً مع رمز الدولة.");
+      setError(
+        "أدخل رقماً عراقياً يبدأ بـ07 أو رقماً دولياً مع رمز الدولة.",
+      );
       return;
     }
+
+    if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      setError("أدخل مبلغاً صحيحاً أكبر من صفر.");
+      return;
+    }
+
     submitLock.current = true;
     idempotencyKey.current ??= crypto.randomUUID();
+
     try {
       sessionStorage.setItem(
         storageKey,
         JSON.stringify({
           key: idempotencyKey.current,
-          representativeName,
           phone: normalizedPhone.data,
           amount,
         }),
@@ -98,9 +111,11 @@ export default function PublicCompanyPage() {
     } catch {
       // Keep the in-memory key even when browser storage is unavailable.
     }
+
     setRetryLocked(true);
     setBusy(true);
     setError("");
+
     try {
       const r = await fetch(
         `/api/public/${encodeURIComponent(token)}/requests`,
@@ -108,14 +123,15 @@ export default function PublicCompanyPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            representativeName,
             phone: normalizedPhone.data,
             amount,
             idempotencyKey: idempotencyKey.current,
           }),
         },
       );
+
       const d = await r.json();
+
       if (!r.ok) {
         if (
           r.status >= 400 &&
@@ -127,8 +143,10 @@ export default function PublicCompanyPage() {
           setRetryLocked(false);
           clearPendingStorage();
         }
+
         throw new Error(d.error || "تعذر إرسال الطلب");
       }
+
       idempotencyKey.current = null;
       setRetryLocked(false);
       clearPendingStorage();
@@ -140,6 +158,7 @@ export default function PublicCompanyPage() {
       setBusy(false);
     }
   }
+
   return (
     <main className="public-wrap">
       <section className="public-brand">
@@ -150,6 +169,7 @@ export default function PublicCompanyPage() {
         <h1>نظام مواعيد التسديد للمولات</h1>
         <p>طلب موعد الاستلام — سريع، واضح وآمن</p>
       </section>
+
       <section className="public-card">
         <div className="public-head">
           <span className="public-icon">▦</span>
@@ -160,6 +180,7 @@ export default function PublicCompanyPage() {
             </p>
           </div>
         </div>
+
         {loading ? (
           <p>جارٍ تحميل بيانات الرابط…</p>
         ) : error && !info ? (
@@ -186,25 +207,16 @@ export default function PublicCompanyPage() {
                 <label htmlFor="company-name">الشركة</label>
                 <input id="company-name" value={info.company.name} readOnly />
               </div>
+
               <div className="field">
                 <label htmlFor="mall-name">المول</label>
                 <input id="mall-name" value={info.company.mall} readOnly />
               </div>
+
               <div className="field">
-                <label htmlFor="representative-name">اسم المندوب *</label>
-                <input
-                  id="representative-name"
-                  required
-                  minLength={2}
-                  maxLength={120}
-                  disabled={busy || retryLocked}
-                  value={rep}
-                  onChange={(e) => setRep(e.target.value)}
-                  placeholder="اكتب اسم المندوب"
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="representative-phone">رقم هاتف المندوب *</label>
+                <label htmlFor="representative-phone">
+                  رقم هاتف المندوب *
+                </label>
                 <input
                   id="representative-phone"
                   type="tel"
@@ -219,6 +231,7 @@ export default function PublicCompanyPage() {
                   inputMode="tel"
                 />
               </div>
+
               <div className="field">
                 <label htmlFor="request-amount">المبلغ المطلوب (د.ع) *</label>
                 <input
@@ -233,11 +246,13 @@ export default function PublicCompanyPage() {
                   placeholder="أدخل المبلغ"
                 />
               </div>
+
               {error && (
                 <p className="error" role="alert">
                   {error}
                 </p>
               )}
+
               <button className="btn" disabled={busy}>
                 {busy
                   ? "جارٍ إرسال الطلب…"
@@ -245,6 +260,7 @@ export default function PublicCompanyPage() {
                     ? "إعادة المحاولة بنفس الطلب"
                     : "إرسال الطلب ←"}
               </button>
+
               <p className="muted center">
                 الموعد لا يحدده المندوب؛ ستراجعه الإدارة وتتواصل معك بعد
                 اعتماده.
@@ -253,6 +269,7 @@ export default function PublicCompanyPage() {
           ))
         )}
       </section>
+
       <footer className="public-footer">
         MallPay · نظام إدارة مواعيد التسديد
       </footer>

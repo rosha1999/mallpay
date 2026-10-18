@@ -14,7 +14,7 @@ import { moneyAmountSchema, toCents } from "@/lib/money";
 import { phoneNumberSchema } from "@/lib/phone";
 
 const schema = z.object({
-  representativeName: z.string().trim().min(2).max(120),
+  representativeName: z.string().trim().min(2).max(120).optional(),
   amount: moneyAmountSchema,
   phone: phoneNumberSchema,
   idempotencyKey: z.string().min(12).max(100),
@@ -36,7 +36,7 @@ function matchesExistingPublicRequest(
     return existing.idempotencyFingerprint === fingerprint;
   return (
     toCents(existing.amount) === toCents(data.amount) &&
-    existing.representativeName === data.representativeName &&
+    existing.representativeName === (data.representativeName ?? null) &&
     existing.representativePhone === data.phone
   );
 }
@@ -113,7 +113,7 @@ export async function POST(
   const fingerprint = payloadFingerprint({
     type: "public-request-v1",
     companyId: access.companyId,
-    representativeName: data.representativeName,
+    representativeName: data.representativeName ?? null,
     representativePhone: data.phone,
     amount: data.amount,
   });
@@ -161,7 +161,7 @@ export async function POST(
           amount: data.amount,
           dueAt: null,
           status: "PENDING",
-          representativeName: data.representativeName,
+          representativeName: data.representativeName ?? null,
           representativePhone: data.phone,
           idempotencyKey: data.idempotencyKey,
           idempotencyFingerprint: fingerprint,
@@ -173,7 +173,7 @@ export async function POST(
         select: { id: true, email: true },
       });
       if (admins.length) {
-        const message = `طلب جديد من ${access.company.name} — ${data.representativeName}`;
+        const message = `طلب جديد من ${access.company.name}`;
         const createdAt = new Date();
         await tx.notification.createMany({
           data: admins.flatMap((admin) => [

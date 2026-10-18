@@ -10,7 +10,7 @@ const links = [
   { href: "/dashboard/notifications", label: "▤　الإشعارات" },
   { href: "/dashboard/calendar", label: "▦　المواعيد" },
   { href: "/dashboard/companies", label: "▤　الشركات" },
-  { href: "/dashboard/company-links", label: "↗　روابط الشركات" },
+  { href: "/dashboard/company-links", label: "↗　رابط الطلب" },
   { href: "/dashboard/malls", label: "▥　المولات" },
   { href: "/dashboard/reports", label: "▧　التقارير" },
 ];
