@@ -41,6 +41,10 @@ export async function POST(request: NextRequest) {
   const expiresAt = new Date(now.getTime() + linkLifetimeMs);
   try {
     await prisma.$transaction(async (tx) => {
+      // Serialize global-link rotations: without this, two concurrent
+      // rotations can each revoke the old token and then both create a new
+      // one, leaving two valid links instead of one.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mallpay:global-company-link'))`;
       await tx.companyToken.updateMany({
         where: { companyId: null, revokedAt: null },
         data: { revokedAt: now },
@@ -80,6 +84,7 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const revoked = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mallpay:global-company-link'))`;
       const result = await tx.companyToken.updateMany({
         where: { companyId: null, revokedAt: null },
         data: { revokedAt: new Date() },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/http";
 import { fromCents, toCents } from "@/lib/money";
@@ -13,6 +14,11 @@ const statusSchema = z.enum([
   "PAID",
   "CANCELLED",
 ]);
+
+// Rows are streamed in batches so a large export never loads everything
+// into memory at once; requests beyond this are rejected with 413.
+const EXPORT_BATCH_SIZE = 500;
+const MAX_EXPORT_ROWS = 50_000;
 
 function csv(value: unknown): string {
   let text = String(value ?? "");
@@ -60,24 +66,51 @@ export async function GET(request: NextRequest) {
     ? new Date(dateTimeToIsoInBaghdad(nextCalendarDate(to!), "00:00")!)
     : null;
 
-  const rows = await prisma.paymentRequest.findMany({
-    where: {
-      ...(fromDate || toDateExclusive
-        ? {
-            requestedAt: {
-              ...(fromDate ? { gte: fromDate } : {}),
-              ...(toDateExclusive ? { lt: toDateExclusive } : {}),
-            },
-          }
-        : {}),
-      ...(params.get("mallId") ? { mallId: params.get("mallId")! } : {}),
-      ...(params.get("companyId")
-        ? { companyId: params.get("companyId")! }
-        : {}),
-      ...(status.success && statusParam ? { status: status.data } : {}),
+  const where = {
+    ...(fromDate || toDateExclusive
+      ? {
+          requestedAt: {
+            ...(fromDate ? { gte: fromDate } : {}),
+            ...(toDateExclusive ? { lt: toDateExclusive } : {}),
+          },
+        }
+      : {}),
+    ...(params.get("mallId") ? { mallId: params.get("mallId")! } : {}),
+    ...(params.get("companyId") ? { companyId: params.get("companyId")! } : {}),
+    ...(status.success && statusParam ? { status: status.data } : {}),
+  };
+  const orderBy: Prisma.PaymentRequestOrderByWithRelationInput[] = [
+    { requestedAt: "desc" },
+    { id: "desc" },
+  ];
+
+  // Guard: refuse absurd ranges up front instead of streaming forever.
+  const totalRows = await prisma.paymentRequest.count({ where });
+  if (totalRows > MAX_EXPORT_ROWS) {
+    return NextResponse.json(
+      {
+        error: `عدد الصفوف (${totalRows.toLocaleString("en")}) يتجاوز الحد المسموح (${MAX_EXPORT_ROWS.toLocaleString("en")}). ضيّق نطاق التاريخ أو الفلاتر.`,
+      },
+      { status: 413 },
+    );
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      adminId: auth.admin!.id,
+      action: "EXPORT_CSV",
+      entityType: "PaymentRequest",
+      metadata: {
+        rowCount: totalRows,
+        filters: {
+          from: from ?? null,
+          to: to ?? null,
+          mallId: params.get("mallId"),
+          companyId: params.get("companyId"),
+          status: status.success && statusParam ? status.data : null,
+        },
+      },
     },
-    include: { company: true, mall: true, payments: true },
-    orderBy: { requestedAt: "desc" },
   });
 
   const header = [
@@ -92,7 +125,11 @@ export async function GET(request: NextRequest) {
     "موعد التسديد",
     "ملاحظات المندوب",
   ];
-  const lines = rows.map((row) => {
+  type Row = Prisma.PaymentRequestGetPayload<{
+    include: { company: true; mall: true; payments: true };
+  }>;
+
+  function lineFor(row: Row): string {
     const requested = toCents(row.amount) ?? 0n;
     const paid = row.payments.reduce(
       (sum, payment) => sum + (toCents(payment.amount) ?? 0n),
@@ -113,16 +150,42 @@ export async function GET(request: NextRequest) {
     ]
       .map(csv)
       .join(",");
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode("\uFEFF" + header.map(csv).join(",") + "\r\n"),
+      );
+      try {
+        let cursor: string | undefined;
+        for (;;) {
+          const batch = await prisma.paymentRequest.findMany({
+            where,
+            include: { company: true, mall: true, payments: true },
+            orderBy,
+            take: EXPORT_BATCH_SIZE,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+          });
+          if (batch.length === 0) break;
+          for (const row of batch) {
+            controller.enqueue(encoder.encode(lineFor(row) + "\r\n"));
+          }
+          cursor = batch[batch.length - 1].id;
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
   });
 
-  return new NextResponse(
-    "\uFEFF" + [header.map(csv).join(","), ...lines].join("\r\n"),
-    {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="mallpay-report.csv"',
-        "Cache-Control": "no-store",
-      },
+  return new NextResponse(stream, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="mallpay-report.csv"',
+      "Cache-Control": "no-store",
     },
-  );
+  });
 }

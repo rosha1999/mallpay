@@ -108,7 +108,13 @@ async function main(): Promise<void> {
       await prisma.$transaction([
         prisma.adminUser.update({
           where: { id: existing.id },
-          data: { name, passwordHash, active: true },
+          // Invalidate every live session issued before this reset.
+          data: {
+            name,
+            passwordHash,
+            active: true,
+            sessionVersion: { increment: 1 },
+          },
         }),
         prisma.auditLog.create({
           data: {

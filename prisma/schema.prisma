@@ -46,11 +46,12 @@ enum AppointmentStatus {
 }
 
 model AdminUser {
-  id            String         @id @default(cuid())
-  name          String
-  email         String         @unique
-  passwordHash  String
-  active        Boolean        @default(true)
+  id             String         @id @default(cuid())
+  name           String
+  email          String         @unique
+  passwordHash   String
+  active         Boolean        @default(true)
+  sessionVersion Int            @default(0)
   payments      Payment[]
   auditLogs     AuditLog[]
   notifications Notification[]
