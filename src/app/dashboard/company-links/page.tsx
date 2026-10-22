@@ -26,6 +26,57 @@ type IssuedLink =
       expiresAt: string;
     };
 
+const savedLinksKey = "mallpay:issued-links:v1";
+
+function isIssuedLink(value: unknown): value is IssuedLink {
+  if (!value || typeof value !== "object") return false;
+  const link = value as Record<string, unknown>;
+  if (link.scope !== "all" && link.scope !== "company") return false;
+  if (
+    typeof link.publicLink !== "string" ||
+    typeof link.expiresAt !== "string"
+  )
+    return false;
+  if (
+    link.scope === "company" &&
+    (typeof link.companyId !== "string" ||
+      typeof link.companyName !== "string")
+  )
+    return false;
+  return true;
+}
+
+function linkStillValid(link: IssuedLink) {
+  return new Date(link.expiresAt).getTime() > Date.now();
+}
+
+function sameTarget(a: IssuedLink, b: IssuedLink) {
+  if (a.scope === "all" && b.scope === "all") return true;
+  if (a.scope === "company" && b.scope === "company")
+    return a.companyId === b.companyId;
+  return false;
+}
+
+function readSavedLinks(): IssuedLink[] {
+  try {
+    const raw = localStorage.getItem(savedLinksKey);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isIssuedLink).filter(linkStillValid);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedLinks(links: IssuedLink[]) {
+  try {
+    localStorage.setItem(savedLinksKey, JSON.stringify(links));
+  } catch {
+    // Persistence is optional when browser storage is unavailable.
+  }
+}
+
 function isActiveToken(
   token: TokenInfo | null | undefined,
 ): token is TokenInfo {
@@ -50,6 +101,38 @@ export default function CompanyLinks() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const [savedLinks, setSavedLinks] = useState<IssuedLink[]>([]);
+
+  const remember = useCallback((link: IssuedLink) => {
+    setSavedLinks((current) => {
+      const next = [
+        link,
+        ...current.filter((item) => !sameTarget(item, link)),
+      ].slice(0, 20);
+      writeSavedLinks(next);
+      return next;
+    });
+  }, []);
+
+  const forget = useCallback(
+    (scope: "all" | "company", companyId?: string) => {
+      setSavedLinks((current) => {
+        const next = current.filter((item) => {
+          if (item.scope === "all") return scope !== "all";
+          return !(scope === "company" && item.companyId === companyId);
+        });
+        writeSavedLinks(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const saved = readSavedLinks();
+    setSavedLinks(saved);
+    if (saved.length) setIssued(saved[0]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,12 +205,14 @@ export default function CompanyLinks() {
       setBusyId("");
       return;
     }
-    setIssued({
+    const link: IssuedLink = {
       scope: "company",
       companyId: company.id,
       companyName: company.name,
       ...data,
-    });
+    };
+    setIssued(link);
+    remember(link);
     setNotice("تم إصدار رابط جديد. الرابط السابق لم يعد يعمل.");
     try {
       await load();
@@ -164,6 +249,7 @@ export default function CompanyLinks() {
       setBusyId("");
       return;
     }
+    forget("company", company.id);
     setIssued((current) =>
       current?.scope === "company" && current.companyId === company.id
         ? null
@@ -210,7 +296,9 @@ export default function CompanyLinks() {
       setBusyId("");
       return;
     }
-    setIssued({ scope: "all", ...data });
+    const link: IssuedLink = { scope: "all", ...data };
+    setIssued(link);
+    remember(link);
     setNotice("تم إصدار الرابط العام. شاركه مع المندوبين ليكتبوا اسم الشركة.");
     try {
       await load();
@@ -238,6 +326,7 @@ export default function CompanyLinks() {
         error?: string;
       };
       if (!response.ok) throw new Error(body.error || "تعذر إلغاء الرابط العام");
+      forget("all");
       setIssued((current) => (current?.scope === "all" ? null : current));
       setNotice(
         body.revoked
@@ -263,7 +352,7 @@ export default function CompanyLinks() {
       );
     } catch {
       setNotice(
-        "انسخ الرابط الظاهر يدوياً؛ لا يمكن استعادته بعد إغلاق هذه الصفحة.",
+        "انسخ الرابط الظاهر يدوياً.",
       );
     }
   }
@@ -332,8 +421,8 @@ export default function CompanyLinks() {
           )}
         </div>
         <p className="muted">
-          الرابط صالح 90 يوماً. إصداره من جديد يوقف الرابط العام السابق؛ احتفظ
-          بالرابط الجديد عند ظهوره.
+          الرابط صالح 90 يوماً ويُحفظ في هذا المتصفح بعد إصداره. إصداره من جديد
+          يوقف الرابط العام السابق.
         </p>
       </section>
       {issued && (
@@ -383,7 +472,7 @@ export default function CompanyLinks() {
             </div>
             <div className="field">
               <label htmlFor="company-link">
-                احفظ هذا الرابط الآن؛ لا نخزن النص الأصلي
+                الرابط محفوظ في هذا المتصفح، ويمكنك نسخه أو طباعته لاحقاً
               </label>
               <input
                 id="company-link"
@@ -419,6 +508,67 @@ export default function CompanyLinks() {
             </button>
           </section>
         </>
+      )}
+      {savedLinks.length > 0 && (
+        <section className="panel">
+          <div className="panelhead">
+            <div>
+              <h2>روابط محفوظة في هذا المتصفح</h2>
+              <p className="muted">
+                تبقى بعد التحديث أو إغلاق المتصفح على هذا الجهاز فقط.
+              </p>
+            </div>
+          </div>
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>الرابط</th>
+                  <th>ينتهي في</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savedLinks.map((link) => (
+                  <tr key={link.scope === "all" ? "all" : link.companyId}>
+                    <td>
+                      {link.scope === "all"
+                        ? "رابط عام"
+                        : `رابط ${link.companyName}`}
+                    </td>
+                    <td>{formatBaghdadDate(link.expiresAt)}</td>
+                    <td>
+                      <div className="tableactions">
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => setIssued(link)}
+                        >
+                          عرض وطباعة
+                        </button>
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => {
+                            if (link.scope === "all") forget("all");
+                            else forget("company", link.companyId);
+                            if (issued && sameTarget(issued, link))
+                              setIssued(null);
+                          }}
+                        >
+                          حذف المحفوظ
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted">
+            الحذف هنا يزيل الرابط من هذا المتصفح فقط، ولا يلغيه من النظام.
+          </p>
+        </section>
       )}
       <section className="panel">
         <div className="panelhead">
