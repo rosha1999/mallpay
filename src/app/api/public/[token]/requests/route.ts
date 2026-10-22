@@ -12,16 +12,42 @@ import { payloadFingerprint } from "@/lib/idempotency";
 import { clientIdentifier, consumeRateLimit } from "@/lib/rate-limit";
 import { moneyAmountSchema, toCents } from "@/lib/money";
 import { phoneNumberSchema } from "@/lib/phone";
+import { formatBaghdadDate } from "@/lib/dates";
 
 const schema = z.object({
   companyName: z.string().trim().min(2).max(120).optional(),
   mallId: z.string().trim().min(1).max(100).optional(),
   representativeName: z.string().trim().min(2).max(120).optional(),
+  note: z.string().trim().max(1000).optional(),
   amount: moneyAmountSchema,
   phone: phoneNumberSchema,
   idempotencyKey: z.string().min(12).max(100),
 });
 const linkWindowMs = 60 * 60 * 1000;
+const requestCooldownMs = 20 * 24 * 60 * 60 * 1000;
+
+function companyRequestWhere(
+  mallId: string,
+  companyId: string | null,
+  companyName: string,
+): Prisma.PaymentRequestWhereInput {
+  return {
+    mallId,
+    ...(companyId
+      ? { companyId }
+      : {
+          companyId: null,
+          companyName: { equals: companyName, mode: "insensitive" },
+        }),
+  };
+}
+
+function cooldownMessage(createdAt: Date): string {
+  const remainingMs = requestCooldownMs - (Date.now() - createdAt.getTime());
+  const days = Math.max(1, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+  const availableAt = new Date(createdAt.getTime() + requestCooldownMs);
+  return `لا يمكن إرسال طلب جديد لنفس الشركة قبل مرور 20 يوماً من الطلب الأخير. باقي ${days} يوم، ويمكن الإرسال من ${formatBaghdadDate(availableAt)}.`;
+}
 
 function matchesExistingPublicRequest(
   existing: {
@@ -32,6 +58,7 @@ function matchesExistingPublicRequest(
     amount: unknown;
     representativeName: string | null;
     representativePhone: string | null;
+    representativeNote: string | null;
     idempotencyFingerprint: string | null;
   },
   fingerprint: string,
@@ -39,6 +66,7 @@ function matchesExistingPublicRequest(
   mallId: string | null,
   companyName: string,
   data: z.infer<typeof schema>,
+  note: string | null,
 ): boolean {
   const existingName = (existing.companyName ?? "")
     .replace(/\s+/gu, " ")
@@ -67,10 +95,20 @@ function matchesExistingPublicRequest(
       representativePhone: data.phone,
       amount: data.amount,
     });
+    const previousFingerprint = payloadFingerprint({
+      type: "public-request-v3",
+      companyId: existing.companyId,
+      mallId: existing.mallId,
+      companyName: existing.companyName ?? companyName,
+      representativeName: data.representativeName ?? null,
+      representativePhone: data.phone,
+      amount: data.amount,
+    });
     return (
       existing.idempotencyFingerprint === fingerprint ||
       existing.idempotencyFingerprint === legacyCompanyFingerprint ||
-      existing.idempotencyFingerprint === typedCompanyFingerprint
+      existing.idempotencyFingerprint === typedCompanyFingerprint ||
+      existing.idempotencyFingerprint === previousFingerprint
     );
   }
   return (
@@ -79,7 +117,8 @@ function matchesExistingPublicRequest(
       (existing.companyId === null && existing.mallId === null)) &&
     toCents(existing.amount) === toCents(data.amount) &&
     existing.representativeName === (data.representativeName ?? null) &&
-    existing.representativePhone === data.phone
+    existing.representativePhone === data.phone &&
+    (existing.representativeNote ?? null) === note
   );
 }
 
@@ -220,6 +259,12 @@ export async function POST(
   const companyId = targetCompany?.id ?? null;
   const companyName = targetCompany?.name ?? submittedCompanyName;
   mallId = targetCompany?.mallId ?? mallId;
+  if (!mallId)
+    return NextResponse.json(
+      { error: "اختار المول الذي تتبع له الشركة." },
+      { status: 400 },
+    );
+  const requestMallId = mallId;
 
   const companyRateKey =
     companyId ??
@@ -238,13 +283,15 @@ export async function POST(
       },
     );
 
+  const note = data.note?.trim() || null;
   const fingerprint = payloadFingerprint({
-    type: "public-request-v3",
+    type: "public-request-v4",
     companyId,
     mallId,
     companyName,
     representativeName: data.representativeName ?? null,
     representativePhone: data.phone,
+    note,
     amount: data.amount,
   });
   const existing = await prisma.paymentRequest.findUnique({
@@ -260,6 +307,7 @@ export async function POST(
         mallId,
         companyName,
         data,
+        note,
       )
     ) {
       return NextResponse.json(
@@ -276,8 +324,34 @@ export async function POST(
     return NextResponse.json({ ok: true, reference: existing.reference });
   }
 
+  const previousRequest = await prisma.paymentRequest.findFirst({
+    where: companyRequestWhere(requestMallId, companyId, companyName),
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (
+    previousRequest &&
+    Date.now() - previousRequest.createdAt.getTime() < requestCooldownMs
+  )
+    return NextResponse.json(
+      { error: cooldownMessage(previousRequest.createdAt) },
+      { status: 400 },
+    );
+
   try {
     const created = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`public-request-cooldown:${requestMallId}:${companyName.toLowerCase()}`}))`;
+      const lastRequest = await tx.paymentRequest.findFirst({
+        where: companyRequestWhere(requestMallId, companyId, companyName),
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      if (
+        lastRequest &&
+        Date.now() - lastRequest.createdAt.getTime() < requestCooldownMs
+      )
+        throw new Error(`COOLDOWN:${cooldownMessage(lastRequest.createdAt)}`);
+
       const activeMall = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Mall" WHERE "id" = ${mallId} AND "active" = true FOR SHARE
       `;
@@ -312,6 +386,7 @@ export async function POST(
           status: "PENDING",
           representativeName: data.representativeName ?? null,
           representativePhone: data.phone,
+          representativeNote: note,
           idempotencyKey: data.idempotencyKey,
           idempotencyFingerprint: fingerprint,
           createdByCompanyTokenId: access.id,
@@ -354,6 +429,11 @@ export async function POST(
       { status: 201 },
     );
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("COOLDOWN:"))
+      return NextResponse.json(
+        { error: error.message.slice("COOLDOWN:".length) },
+        { status: 400 },
+      );
     if (error instanceof Error && error.message === "LINK_INACTIVE")
       return NextResponse.json(
         { error: "الرابط غير صالح أو منتهي" },
@@ -375,6 +455,7 @@ export async function POST(
           mallId,
           companyName,
           data,
+          note,
         )
       ) {
         if (duplicate.companyId === null && duplicate.mallId === null && mallId) {

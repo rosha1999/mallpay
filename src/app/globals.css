@@ -212,6 +212,32 @@ th {
   color: #1766c1;
   background: #e7f1ff;
 }
+.purple {
+  color: #5a35b8;
+  background: #efe9ff;
+}
+.gray {
+  color: #55657a;
+  background: #edf1f6;
+}
+tr.status-pending td {
+  background: #fffaf0;
+}
+tr.status-approved td {
+  background: #f3fbf7;
+}
+tr.status-rescheduled td {
+  background: #f7f4ff;
+}
+tr.status-rejected td {
+  background: #fff6f6;
+}
+tr.status-paid td {
+  background: #f3f8ff;
+}
+tr.status-cancelled td {
+  background: #f7f9fc;
+}
 .quick {
   display: grid;
   gap: 9px;

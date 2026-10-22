@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { formatBaghdadDate } from "@/lib/dates";
+import RequestStatusBadge from "@/components/RequestStatusBadge";
 export const dynamic = "force-dynamic";
 const money = (n: number) =>
   new Intl.NumberFormat("ar-IQ", { maximumFractionDigits: 2 }).format(n) +
@@ -87,7 +88,10 @@ export default async function Dashboard() {
               </thead>
               <tbody>
                 {latest.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    className={`status-${r.status.toLowerCase()}`}
+                  >
                     <td>{r.companyName ?? r.company?.name ?? "غير محدد"}</td>
                     <td>{r.mall?.name ?? "غير محدد"}</td>
                     <td>{money(Number(r.amount))}</td>
@@ -97,22 +101,7 @@ export default async function Dashboard() {
                         : "بانتظار تحديد الموعد"}
                     </td>
                     <td>
-                      <span
-                        className={`badge ${r.status === "PAID" ? "green" : r.status === "REJECTED" ? "red" : "orange"}`}
-                      >
-                        {
-                          (
-                            {
-                              PENDING: "جديد",
-                              APPROVED: "تمت الموافقة",
-                              RESCHEDULED: "أعيدت الجدولة",
-                              REJECTED: "مرفوض",
-                              PAID: "مدفوع",
-                              CANCELLED: "ملغى",
-                            } as Record<string, string>
-                          )[r.status]
-                        }
-                      </span>
+                      <RequestStatusBadge status={r.status} />
                     </td>
                   </tr>
                 ))}

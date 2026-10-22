@@ -122,6 +122,7 @@ model PaymentRequest {
   note                    String?
   representativeName      String?
   representativePhone     String?
+  representativeNote      String?
   idempotencyKey          String?        @unique
   idempotencyFingerprint  String?        @db.Char(64)
   createdByCompanyTokenId String?

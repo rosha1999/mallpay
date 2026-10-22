@@ -161,7 +161,8 @@ export async function POST(request: NextRequest) {
     }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2034"
+      (error.code === "P2034" ||
+        (error.code === "P2010" && error.meta?.code === "40001"))
     ) {
       const duplicate = await prisma.payment
         .findUnique({ where: { idempotencyKey: data.idempotencyKey } })

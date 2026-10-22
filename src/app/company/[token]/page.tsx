@@ -17,6 +17,7 @@ export default function PublicCompanyPage() {
   const [mallId, setMallId] = useState("");
   const [phone, setPhone] = useState("");
   const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [retryLocked, setRetryLocked] = useState(false);
@@ -26,6 +27,7 @@ export default function PublicCompanyPage() {
   const idempotencyKey = useRef<string | null>(null);
   const submitLock = useRef(false);
   const storageKey = `mallpay:public-request:${token}`;
+  const identityKey = `mallpay:public-representative:${token}`;
 
   const clearPendingStorage = useCallback(() => {
     try {
@@ -40,9 +42,11 @@ export default function PublicCompanyPage() {
     idempotencyKey.current = null;
     setCompanyName("");
     setMallId("");
+    setNote("");
     setRetryLocked(false);
     setLegacyMallRetry(false);
 
+    let restoredFromPending = false;
     try {
       const pending = sessionStorage.getItem(storageKey);
 
@@ -55,6 +59,7 @@ export default function PublicCompanyPage() {
           companyId?: unknown;
           companyName?: unknown;
           mallId?: unknown;
+          note?: unknown;
         };
 
         const savedCompanyName =
@@ -68,11 +73,13 @@ export default function PublicCompanyPage() {
           !legacyCompanySelection
         ) {
           idempotencyKey.current = saved.key;
+          restoredFromPending = true;
           setPhone(saved.phone);
           setAmount(saved.amount);
           if (savedCompanyName) setCompanyName(savedCompanyName);
           if (typeof saved.mallId === "string") setMallId(saved.mallId);
           else if (savedCompanyName) setLegacyMallRetry(true);
+          if (typeof saved.note === "string") setNote(saved.note);
           setRetryLocked(true);
         } else {
           clearPendingStorage();
@@ -80,6 +87,19 @@ export default function PublicCompanyPage() {
       }
     } catch {
       clearPendingStorage();
+    }
+
+    if (!restoredFromPending) {
+      try {
+        const last = JSON.parse(
+          localStorage.getItem(identityKey) ?? "null",
+        ) as { companyName?: unknown; mallId?: unknown } | null;
+        if (last && typeof last.companyName === "string")
+          setCompanyName(last.companyName);
+        if (last && typeof last.mallId === "string") setMallId(last.mallId);
+      } catch {
+        // Saved representative details are optional.
+      }
     }
 
     fetch(`/api/public/${encodeURIComponent(token)}/requests`)
@@ -98,7 +118,7 @@ export default function PublicCompanyPage() {
     return () => {
       active = false;
     };
-  }, [clearPendingStorage, storageKey, token]);
+  }, [clearPendingStorage, identityKey, storageKey, token]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -137,6 +157,7 @@ export default function PublicCompanyPage() {
           key: idempotencyKey.current,
           phone: normalizedPhone.data,
           amount,
+          note: note.trim(),
           ...(info.company ? {} : { companyName: companyName.trim() }),
           ...(info.company ? {} : { mallId }),
         }),
@@ -159,6 +180,7 @@ export default function PublicCompanyPage() {
           body: JSON.stringify({
             phone: normalizedPhone.data,
             amount,
+            note: note.trim() || undefined,
             ...(info.company ? {} : { companyName: companyName.trim() }),
             ...(info.company ? {} : { mallId }),
             idempotencyKey: idempotencyKey.current,
@@ -188,6 +210,19 @@ export default function PublicCompanyPage() {
       setRetryLocked(false);
       setLegacyMallRetry(false);
       clearPendingStorage();
+      if (!info.company && companyName.trim()) {
+        try {
+          localStorage.setItem(
+            identityKey,
+            JSON.stringify({
+              companyName: companyName.trim(),
+              mallId,
+            }),
+          );
+        } catch {
+          // Remembering the company is optional.
+        }
+      }
       setReference(d.reference);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر الإرسال");
@@ -195,6 +230,17 @@ export default function PublicCompanyPage() {
       submitLock.current = false;
       setBusy(false);
     }
+  }
+
+  function startAnother() {
+    idempotencyKey.current = null;
+    setReference("");
+    setAmount("");
+    setNote("");
+    setError("");
+    setRetryLocked(false);
+    setLegacyMallRetry(false);
+    clearPendingStorage();
   }
 
   const selectedMallName = info?.malls?.find((mall) => mall.id === mallId)?.name;
@@ -248,6 +294,15 @@ export default function PublicCompanyPage() {
                 ستقوم الإدارة بمراجعة المبلغ وتحديد الموعد، ثم يصلك إشعار عند
                 اعتماده.
               </p>
+              {!info.company && (
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={startAnother}
+                >
+                  إرسال طلب لشركة أخرى
+                </button>
+              )}
             </div>
           ) : (
             <form onSubmit={submit} className="public-form">
@@ -341,6 +396,19 @@ export default function PublicCompanyPage() {
                 />
               </div>
 
+              <div className="field">
+                <label htmlFor="request-note">ملاحظات (اختياري)</label>
+                <textarea
+                  id="request-note"
+                  rows={2}
+                  maxLength={500}
+                  disabled={busy || retryLocked}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="أي تفاصيل إضافية عن الطلب"
+                />
+              </div>
+
               {error && (
                 <p className="error" role="alert">
                   {error}
@@ -359,8 +427,8 @@ export default function PublicCompanyPage() {
               </button>
 
               <p className="muted center">
-                الموعد لا يحدده المندوب؛ ستراجعه الإدارة وتتواصل معك بعد
-                اعتماده.
+                يمكن إرسال طلب واحد لنفس الشركة كل 20 يوماً. الموعد لا يحدده
+                المندوب؛ ستراجعه الإدارة وتتواصل معك بعد اعتماده.
               </p>
             </form>
           ))

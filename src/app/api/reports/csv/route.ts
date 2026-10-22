@@ -90,6 +90,7 @@ export async function GET(request: NextRequest) {
     "الحالة",
     "تاريخ الطلب",
     "موعد التسديد",
+    "ملاحظات المندوب",
   ];
   const lines = rows.map((row) => {
     const requested = toCents(row.amount) ?? 0n;
@@ -108,6 +109,7 @@ export async function GET(request: NextRequest) {
       row.status,
       row.requestedAt.toISOString(),
       row.appointmentAt?.toISOString() ?? "",
+      row.representativeNote ?? "",
     ]
       .map(csv)
       .join(",");

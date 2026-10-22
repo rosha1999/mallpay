@@ -9,6 +9,7 @@ import {
 } from "@/lib/dates";
 import { fromCents, remainingBalanceCents, toCents } from "@/lib/money";
 import { shouldRotatePaymentKey } from "@/lib/payment-retry";
+import RequestStatusBadge from "@/components/RequestStatusBadge";
 
 type Row = {
   id: string;
@@ -17,6 +18,7 @@ type Row = {
   dueAt: string | null;
   appointmentAt: string | null;
   note: string | null;
+  representativeNote: string | null;
   status: string;
   companyName: string | null;
   company: { name: string } | null;
@@ -33,7 +35,6 @@ const statuses = [
   ["PAID", "مدفوع"],
   ["CANCELLED", "ملغى"],
 ] as const;
-const statusLabel = Object.fromEntries(statuses) as Record<string, string>;
 
 function useModalFocus(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLElement>(null);
@@ -465,9 +466,19 @@ export default function Requests() {
                     "CANCELLED",
                   ].includes(row.status);
                   return (
-                    <tr key={row.id}>
+                    <tr
+                      key={row.id}
+                      className={`status-${row.status.toLowerCase()}`}
+                    >
                       <td>{row.reference.slice(0, 8)}</td>
-                      <td>{row.companyName ?? row.company?.name ?? "غير محدد"}</td>
+                      <td>
+                        {row.companyName ?? row.company?.name ?? "غير محدد"}
+                        {row.representativeNote && (
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {row.representativeNote}
+                          </div>
+                        )}
+                      </td>
                       <td>{row.mall?.name ?? "غير محدد"}</td>
                       <td>{money(row.amount)}</td>
                       <td>{money(paidAmount(row))}</td>
@@ -477,11 +488,7 @@ export default function Requests() {
                           : "لم يحدد بعد"}
                       </td>
                       <td>
-                        <span
-                          className={`badge ${row.status === "PAID" ? "green" : row.status === "REJECTED" ? "red" : row.status === "PENDING" ? "orange" : "blue"}`}
-                        >
-                          {statusLabel[row.status] || row.status}
-                        </span>
+                        <RequestStatusBadge status={row.status} />
                       </td>
                       <td>
                         {manageable && (
@@ -695,6 +702,11 @@ export default function Requests() {
             <p className="muted">
               {selected.companyName ?? selected.company?.name ?? "غير محدد"} · {money(selected.amount)}
             </p>
+            {selected.representativeNote && (
+              <p className="muted">
+                ملاحظات المندوب: {selected.representativeNote}
+              </p>
+            )}
             {error && (
               <p className="error" role="alert">
                 {error}

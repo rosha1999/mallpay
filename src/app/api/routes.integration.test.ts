@@ -50,6 +50,7 @@ let mall: { id: string };
 let company: { id: string };
 let otherMall: { id: string };
 let otherCompany: { id: string };
+let publicCompany: { id: string };
 let allCompaniesTokenId: string | undefined;
 let unlistedRequestId: string | undefined;
 let originalAppUrl: string | undefined;
@@ -93,6 +94,9 @@ integration("admin API route integration", () => {
     otherCompany = await session.company.create({
       data: { name: `API second company ${suffix}`, mallId: otherMall.id },
     });
+    publicCompany = await session.company.create({
+      data: { name: `API public company ${suffix}`, mallId: mall.id },
+    });
   });
 
   beforeEach(() => {
@@ -100,7 +104,7 @@ integration("admin API route integration", () => {
   });
 
   afterAll(async () => {
-    const companyIds = [company?.id, otherCompany?.id].filter(
+    const companyIds = [company?.id, otherCompany?.id, publicCompany?.id].filter(
       (id): id is string => Boolean(id),
     );
     if (allCompaniesTokenId)
@@ -244,6 +248,7 @@ integration("admin API route integration", () => {
       submit(`pay-a-${suffix}`),
       submit(`pay-b-${suffix}`),
     ]);
+
     expect(responses.filter((response) => response.status === 201)).toHaveLength(
       1,
     );
@@ -261,13 +266,14 @@ integration("admin API route integration", () => {
     const token = randomUUID().replaceAll("-", "");
     const tokenRow = await session.companyToken.create({
       data: {
-        companyId: company.id,
+        companyId: publicCompany.id,
         tokenHash: createHash("sha256").update(token).digest("hex"),
       },
     });
     rateLimitKeys.push(`public-link:${tokenRow.id}`);
     const body = {
       representativeName: "Test Representative",
+      companyName: "Attempted override",
       amount: "50.00",
       phone: "+9647701234567",
       idempotencyKey: `public-${suffix}`,
@@ -290,24 +296,26 @@ integration("admin API route integration", () => {
         where: { idempotencyKey: body.idempotencyKey },
       }),
     ).toBe(1);
-    const companyNameOverride = await createPublicRequest(
+    const repeat = await createPublicRequest(
       jsonRequest(`/api/public/${token}/requests`, {
         ...body,
-        companyName: `API second company ${suffix}`,
-        idempotencyKey: `public-override-${suffix}`,
+        idempotencyKey: `public-repeat-${suffix}`,
       }),
       { params: Promise.resolve({ token }) },
     );
-    expect(companyNameOverride.status).toBe(201);
-    const fixedLinkRequest = await session.paymentRequest.findUniqueOrThrow({
-      where: { idempotencyKey: `public-override-${suffix}` },
-    });
-    expect(fixedLinkRequest).toMatchObject({
-      companyId: company.id,
-      companyName: `API company ${suffix}`,
-    });
+    expect(repeat.status).toBe(400);
+    expect((await repeat.json()).error).toContain("20");
+    expect(
+      await session.paymentRequest.count({
+        where: { idempotencyKey: `public-repeat-${suffix}` },
+      }),
+    ).toBe(0);
     const created = await session.paymentRequest.findUniqueOrThrow({
       where: { idempotencyKey: body.idempotencyKey },
+    });
+    expect(created).toMatchObject({
+      companyId: publicCompany.id,
+      companyName: `API public company ${suffix}`,
     });
     const queuedEmail = await session.notification.findFirst({
       where: { requestId: created.id, channel: "EMAIL" },
@@ -417,6 +425,7 @@ integration("admin API route integration", () => {
       companyName: `API second company ${suffix}`,
       mallId: otherMall.id,
       representativeName: "Shared Link Representative",
+      note: "ملاحظة المندوب",
       amount: "75.00",
       phone: "+9647701234567",
       idempotencyKey: `public-all-${suffix}`,
@@ -433,8 +442,27 @@ integration("admin API route integration", () => {
       companyId: otherCompany.id,
       mallId: otherMall.id,
       companyName: `API second company ${suffix}`,
+      representativeNote: "ملاحظة المندوب",
       createdByCompanyTokenId: tokenRow.id,
     });
+    const changedNote = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        ...body,
+        note: "ملاحظة مختلفة",
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(changedNote.status).toBe(409);
+
+    const repeatRegistered = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        ...body,
+        idempotencyKey: `public-repeat-registered-${suffix}`,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(repeatRegistered.status).toBe(400);
+    expect((await repeatRegistered.json()).error).toContain("20");
 
     const unlistedCompanyName = `Unregistered company ${suffix}`;
     const unlistedBody = {
@@ -474,6 +502,15 @@ integration("admin API route integration", () => {
     expect((await unlistedReplay.json()).reference).toBe(
       unlistedResult.reference,
     );
+    const repeatUnlisted = await createPublicRequest(
+      jsonRequest(`/api/public/${token}/requests`, {
+        ...unlistedBody,
+        idempotencyKey: `public-repeat-unlisted-${suffix}`,
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(repeatUnlisted.status).toBe(400);
+    expect((await repeatUnlisted.json()).error).toContain("20");
 
     const requestList = await listRequests(
       new NextRequest(`${origin}/api/requests?page=1`),
