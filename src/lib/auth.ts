@@ -19,7 +19,10 @@ export async function createSession(adminId: string) {
   // The v claim binds the token to the admin's credential generation.
   // Bumping sessionVersion (e.g. on password reset) invalidates every
   // previously issued session, even though JWTs are otherwise stateless.
-  const token = await new SignJWT({ sub: adminId, v: admin?.sessionVersion ?? 0 })
+  const token = await new SignJWT({
+    sub: adminId,
+    v: admin?.sessionVersion ?? 0,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("8h")

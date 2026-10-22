@@ -7,7 +7,9 @@ import { z } from "zod";
 
 async function readHidden(prompt: string): Promise<string> {
   if (!input.isTTY || !input.setRawMode) {
-    throw new Error("Run this command in an interactive terminal to enter a password safely.");
+    throw new Error(
+      "Run this command in an interactive terminal to enter a password safely.",
+    );
   }
 
   return new Promise((resolve, reject) => {
@@ -97,7 +99,9 @@ async function main(): Promise<void> {
         (await rl.question(`Admin name [${existing.name}]: `)).trim() ||
         existing.name;
 
-      const password = await readHidden("New admin password (12+ characters, hidden): ");
+      const password = await readHidden(
+        "New admin password (12+ characters, hidden): ",
+      );
 
       if (password.length < 12 || password.length > 200) {
         throw new Error("Password must be between 12 and 200 characters.");
@@ -133,7 +137,9 @@ async function main(): Promise<void> {
         (await rl.question("Admin name [مدير النظام]: ")).trim() ||
         "مدير النظام";
 
-      const password = await readHidden("Admin password (12+ characters, hidden): ");
+      const password = await readHidden(
+        "Admin password (12+ characters, hidden): ",
+      );
 
       if (password.length < 12 || password.length > 200) {
         throw new Error("Password must be between 12 and 200 characters.");
