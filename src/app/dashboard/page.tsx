@@ -18,7 +18,60 @@ type RequestGroup = {
   title: string;
   rows: RequestRow[];
   showMall: boolean;
+  emptyText: string;
 };
+function RequestsPanel({ group }: { group: RequestGroup }) {
+  return (
+    <section className="panel">
+      <div className="panelhead">
+        <h2>{group.title}</h2>
+        <a className="btn secondary" href="/dashboard/requests">
+          عرض الكل
+        </a>
+      </div>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الشركة</th>
+              {group.showMall && <th>المول</th>}
+              <th>المبلغ</th>
+              <th>الموعد</th>
+              <th>الحالة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.rows.map((r) => (
+              <tr key={r.id} className={`status-${r.status.toLowerCase()}`}>
+                <td>{r.companyName ?? r.company?.name ?? "غير محدد"}</td>
+                {group.showMall && <td>{r.mall?.name ?? "غير محدد"}</td>}
+                <td>{money(Number(r.amount))}</td>
+                <td>
+                  {r.appointmentAt
+                    ? formatBaghdadDate(r.appointmentAt)
+                    : "بانتظار تحديد الموعد"}
+                </td>
+                <td>
+                  <RequestStatusBadge status={r.status} />
+                </td>
+              </tr>
+            ))}
+            {!group.rows.length && (
+              <tr>
+                <td
+                  colSpan={group.showMall ? 5 : 4}
+                  style={{ textAlign: "center", padding: 30 }}
+                >
+                  {group.emptyText}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 export default async function Dashboard() {
   const [requests, companies, malls, payments, pending, mallList] =
     await Promise.all([
@@ -38,14 +91,17 @@ export default async function Dashboard() {
   let groups: RequestGroup[];
   if (mallList.length) {
     const [perMall, unassigned] = await Promise.all([
-      Promise.all(mallList.map((m) => latestFor({ mallId: m.id }))),
-      latestFor({ mallId: null }),
+      Promise.all(
+        mallList.map((m) => latestFor({ mallId: m.id, status: "PENDING" })),
+      ),
+      latestFor({ mallId: null, status: "PENDING" }),
     ]);
     groups = mallList.map((m, i) => ({
       key: m.id,
       title: `طلبات ${m.name}`,
       rows: perMall[i],
       showMall: false,
+      emptyText: "لا توجد طلبات جديدة لهذا المول",
     }));
     if (unassigned.length) {
       groups.push({
@@ -53,6 +109,7 @@ export default async function Dashboard() {
         title: "طلبات بدون مول محدد",
         rows: unassigned,
         showMall: false,
+        emptyText: "لا توجد طلبات جديدة",
       });
     }
   } else {
@@ -60,11 +117,34 @@ export default async function Dashboard() {
       {
         key: "all",
         title: "أحدث طلبات التسديد",
-        rows: await latestFor({}),
+        rows: await latestFor({ status: "PENDING" }),
         showMall: true,
+        emptyText: "لا توجد طلبات جديدة حتى الآن",
       },
     ];
   }
+  const [completed, cancelled] = await Promise.all([
+    latestFor({
+      status: { in: ["APPROVED", "RESCHEDULED", "PAID", "REJECTED"] },
+    }),
+    latestFor({ status: "CANCELLED" }),
+  ]);
+  const archiveGroups: RequestGroup[] = [
+    {
+      key: "completed",
+      title: "الطلبات المكتملة",
+      rows: completed,
+      showMall: true,
+      emptyText: "لا توجد طلبات مكتملة حتى الآن",
+    },
+    {
+      key: "cancelled",
+      title: "الطلبات الملغية",
+      rows: cancelled,
+      showMall: true,
+      emptyText: "لا توجد طلبات ملغية حتى الآن",
+    },
+  ];
   const paid = Number(payments._sum.amount || 0),
     requested = Number(requests._sum.amount || 0);
   return (
@@ -113,61 +193,7 @@ export default async function Dashboard() {
       <div className="layout2">
         <div className="mallgrid">
           {groups.map((g) => (
-            <section className="panel" key={g.key}>
-              <div className="panelhead">
-                <h2>{g.title}</h2>
-                <a className="btn secondary" href="/dashboard/requests">
-                  عرض الكل
-                </a>
-              </div>
-              <div className="tablewrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>الشركة</th>
-                      {g.showMall && <th>المول</th>}
-                      <th>المبلغ</th>
-                      <th>الموعد</th>
-                      <th>الحالة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.rows.map((r) => (
-                      <tr
-                        key={r.id}
-                        className={`status-${r.status.toLowerCase()}`}
-                      >
-                        <td>
-                          {r.companyName ?? r.company?.name ?? "غير محدد"}
-                        </td>
-                        {g.showMall && (
-                          <td>{r.mall?.name ?? "غير محدد"}</td>
-                        )}
-                        <td>{money(Number(r.amount))}</td>
-                        <td>
-                          {r.appointmentAt
-                            ? formatBaghdadDate(r.appointmentAt)
-                            : "بانتظار تحديد الموعد"}
-                        </td>
-                        <td>
-                          <RequestStatusBadge status={r.status} />
-                        </td>
-                      </tr>
-                    ))}
-                    {!g.rows.length && (
-                      <tr>
-                        <td
-                          colSpan={g.showMall ? 5 : 4}
-                          style={{ textAlign: "center", padding: 30 }}
-                        >
-                          لا توجد طلبات حتى الآن
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <RequestsPanel key={g.key} group={g} />
           ))}
         </div>
         <section className="panel">
@@ -218,6 +244,11 @@ export default async function Dashboard() {
             </div>
           </div>
         </section>
+      </div>
+      <div className="mallgrid" style={{ marginTop: 16 }}>
+        {archiveGroups.map((g) => (
+          <RequestsPanel key={g.key} group={g} />
+        ))}
       </div>
     </>
   );
