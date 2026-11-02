@@ -125,9 +125,9 @@ export default async function Dashboard() {
   }
   const [completed, cancelled] = await Promise.all([
     latestFor({
-      status: { in: ["APPROVED", "RESCHEDULED", "PAID", "REJECTED"] },
+      status: { in: ["APPROVED", "RESCHEDULED", "PAID"] },
     }),
-    latestFor({ status: "CANCELLED" }),
+    latestFor({ status: { in: ["REJECTED", "CANCELLED"] } }),
   ]);
   const archiveGroups: RequestGroup[] = [
     {
