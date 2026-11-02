@@ -169,6 +169,9 @@ a {
   background: #eaf2fc;
   color: #1557a0;
 }
+.btn.danger {
+  background: #c33b47;
+}
 .tablewrap {
   overflow-x: auto;
 }
