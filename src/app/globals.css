@@ -259,6 +259,17 @@ tr.status-cancelled td {
   grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr);
   gap: 16px;
 }
+.mallgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+.mallgrid .tablewrap {
+  max-height: 430px;
+  overflow-y: auto;
+}
 .formgrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -309,6 +320,9 @@ tr.status-cancelled td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .layout2 {
+    grid-template-columns: 1fr;
+  }
+  .mallgrid {
     grid-template-columns: 1fr;
   }
   .sidebar {
