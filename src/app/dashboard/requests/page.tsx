@@ -26,6 +26,8 @@ type Row = {
   payments: { amount: string }[];
 };
 type RequestPage = { rows: Row[]; total: number; page: number; pageCount: number };
+type Mall = { id: string; name: string };
+type RequestBox = { key: string; title: string; rows: Row[] };
 
 const statuses = [
   ["PENDING", "طلب جديد"],
@@ -130,6 +132,7 @@ export default function Requests() {
   const [pageCount, setPageCount] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [malls, setMalls] = useState<Mall[]>([]);
   const remainingCents = payRow
     ? (remainingBalanceCents(
         payRow.amount,
@@ -200,6 +203,18 @@ export default function Requests() {
       active = false;
     };
   }, [statusFilter, page]);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/malls")
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data: Mall[]) => {
+        if (active && Array.isArray(data)) setMalls(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const money = (value: string | number) =>
     `${new Intl.NumberFormat("ar-IQ", { maximumFractionDigits: 2 }).format(Number(value))} د.ع`;
@@ -404,6 +419,111 @@ export default function Requests() {
     }
   }
 
+  function renderRow(row: Row, showMall: boolean) {
+    const manageable = ![
+      "PAID",
+      "REJECTED",
+      "CANCELLED",
+    ].includes(row.status);
+    return (
+      <tr
+        key={row.id}
+        className={`status-${row.status.toLowerCase()}`}
+      >
+        <td>{row.reference.slice(0, 8)}</td>
+        <td>
+          {row.companyName ?? row.company?.name ?? "غير محدد"}
+          {row.representativeNote && (
+            <div className="muted" style={{ fontSize: 11 }}>
+              {row.representativeNote}
+            </div>
+          )}
+        </td>
+        {showMall && <td>{row.mall?.name ?? "غير محدد"}</td>}
+        <td>{money(row.amount)}</td>
+        <td>{money(paidAmount(row))}</td>
+        <td>
+          {row.appointmentAt
+            ? formatBaghdadDateTime(row.appointmentAt)
+            : "لم يحدد بعد"}
+        </td>
+        <td>
+          <RequestStatusBadge status={row.status} />
+        </td>
+        <td>
+          {manageable && (
+            <div className="tableactions">
+              <button
+                className="btn secondary"
+                disabled={busy || loading}
+                onClick={() => openSchedule(row)}
+              >
+                {row.appointmentAt
+                  ? "تغيير الموعد"
+                  : "تحديد موعد"}
+              </button>
+              <button
+                className="btn secondary"
+                disabled={busy || loading}
+                onClick={() => openPayment(row)}
+              >
+                تسجيل دفعة
+              </button>
+              {row.status === "PENDING" &&
+                row.payments.length > 0 && (
+                  <span className="muted">
+                    لا يمكن الرفض بعد استلام دفعة
+                  </span>
+                )}
+              {row.status === "PENDING" &&
+                row.payments.length === 0 && (
+                <button
+                  className="btn secondary"
+                  disabled={busy || loading}
+                  onClick={() => void reject(row)}
+                >
+                  رفض
+                </button>
+                )}
+            </div>
+          )}
+        </td>
+      </tr>
+      );
+  }
+
+  const boxes: RequestBox[] = malls.map((mall) => ({
+    key: mall.id,
+    title: `طلبات ${mall.name}`,
+    rows: rows.filter((row) => row.mall?.name === mall.name),
+  }));
+  {
+    const known = new Set(malls.map((mall) => mall.name));
+    const extraNames = Array.from(
+      new Set(
+        rows
+          .map((row) => row.mall?.name)
+          .filter(
+            (name): name is string =>
+              Boolean(name) && !known.has(name as string),
+          ),
+      ),
+    );
+    for (const name of extraNames)
+      boxes.push({
+        key: `extra-${name}`,
+        title: `طلبات ${name}`,
+        rows: rows.filter((row) => row.mall?.name === name),
+      });
+    const unassigned = rows.filter((row) => !row.mall);
+    if (unassigned.length)
+      boxes.push({
+        key: "unassigned",
+        title: "طلبات بدون مول محدد",
+        rows: unassigned,
+      });
+  }
+
   return (
     <>
       <h2 className="title">طلبات التسديد</h2>
@@ -442,136 +562,123 @@ export default function Requests() {
           {notice}
         </p>
       )}
-      <section className="panel">
-        <div className="tablewrap">
-          <table>
-            <thead>
-              <tr>
-                <th>رقم الطلب</th>
-                <th>الشركة</th>
-                <th>المول</th>
-                <th>المطلوب</th>
-                <th>المدفوع</th>
-                <th>موعد الاستلام</th>
-                <th>الحالة</th>
-                <th>الإجراء</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loading &&
-                rows.map((row) => {
-                  const manageable = ![
-                    "PAID",
-                    "REJECTED",
-                    "CANCELLED",
-                  ].includes(row.status);
-                  return (
-                    <tr
-                      key={row.id}
-                      className={`status-${row.status.toLowerCase()}`}
-                    >
-                      <td>{row.reference.slice(0, 8)}</td>
-                      <td>
-                        {row.companyName ?? row.company?.name ?? "غير محدد"}
-                        {row.representativeNote && (
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            {row.representativeNote}
-                          </div>
-                        )}
-                      </td>
-                      <td>{row.mall?.name ?? "غير محدد"}</td>
-                      <td>{money(row.amount)}</td>
-                      <td>{money(paidAmount(row))}</td>
-                      <td>
-                        {row.appointmentAt
-                          ? formatBaghdadDateTime(row.appointmentAt)
-                          : "لم يحدد بعد"}
-                      </td>
-                      <td>
-                        <RequestStatusBadge status={row.status} />
-                      </td>
-                      <td>
-                        {manageable && (
-                          <div className="tableactions">
-                            <button
-                              className="btn secondary"
-                              disabled={busy || loading}
-                              onClick={() => openSchedule(row)}
-                            >
-                              {row.appointmentAt
-                                ? "تغيير الموعد"
-                                : "تحديد موعد"}
-                            </button>
-                            <button
-                              className="btn secondary"
-                              disabled={busy || loading}
-                              onClick={() => openPayment(row)}
-                            >
-                              تسجيل دفعة
-                            </button>
-                            {row.status === "PENDING" &&
-                              row.payments.length > 0 && (
-                                <span className="muted">
-                                  لا يمكن الرفض بعد استلام دفعة
-                                </span>
-                              )}
-                            {row.status === "PENDING" &&
-                              row.payments.length === 0 && (
-                              <button
-                                className="btn secondary"
-                                disabled={busy || loading}
-                                onClick={() => void reject(row)}
-                              >
-                                رفض
-                              </button>
-                              )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              {loading && (
+      {loading ? (
+        <section className="panel">
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>رقم الطلب</th>
+                  <th>الشركة</th>
+                  <th>المول</th>
+                  <th>المطلوب</th>
+                  <th>المدفوع</th>
+                  <th>موعد الاستلام</th>
+                  <th>الحالة</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody>
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
                     جارٍ تحميل الطلبات…
                   </td>
                 </tr>
-              )}
-              {!loading && !rows.length && (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
-                    لا توجد طلبات في هذه الحالة
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : malls.length ? (
+        <div className="mallgrid">
+          {boxes.map((box) => (
+            <section className="panel" key={box.key}>
+              <div className="panelhead">
+                <h2>{box.title}</h2>
+              </div>
+              <div className="tablewrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>رقم الطلب</th>
+                      <th>الشركة</th>
+                      <th>المطلوب</th>
+                      <th>المدفوع</th>
+                      <th>موعد الاستلام</th>
+                      <th>الحالة</th>
+                      <th>الإجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {box.rows.map((row) => renderRow(row, false))}
+                    {!box.rows.length && (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          style={{ textAlign: "center", padding: 30 }}
+                        >
+                          لا توجد طلبات مطابقة لهذا المول
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
         </div>
-        {pageCount > 1 && (
-          <nav className="pagination" aria-label="صفحات الطلبات">
-            <button
-              className="btn secondary"
-              type="button"
-              disabled={loading || busy || page <= 1}
-              onClick={() => changePage(page - 1)}
-            >
-              السابق
-            </button>
-            <span aria-current="page">
-              صفحة {page} من {pageCount} · {totalRows} طلباً
-            </span>
-            <button
-              className="btn secondary"
-              type="button"
-              disabled={loading || busy || page >= pageCount}
-              onClick={() => changePage(page + 1)}
-            >
-              التالي
-            </button>
-          </nav>
-        )}
-      </section>
+      ) : (
+        <section className="panel">
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>رقم الطلب</th>
+                  <th>الشركة</th>
+                  <th>المول</th>
+                  <th>المطلوب</th>
+                  <th>المدفوع</th>
+                  <th>موعد الاستلام</th>
+                  <th>الحالة</th>
+                  <th>الإجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => renderRow(row, true))}
+                {!rows.length && (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
+                      لا توجد طلبات في هذه الحالة
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {pageCount > 1 && (
+        <nav className="pagination" aria-label="صفحات الطلبات">
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={loading || busy || page <= 1}
+            onClick={() => changePage(page - 1)}
+          >
+            السابق
+          </button>
+          <span aria-current="page">
+            صفحة {page} من {pageCount} · {totalRows} طلباً
+          </span>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={loading || busy || page >= pageCount}
+            onClick={() => changePage(page + 1)}
+          >
+            التالي
+          </button>
+        </nav>
+      )}
 
       {payRow && (
         <div className="modalback">
