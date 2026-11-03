@@ -18,6 +18,8 @@ type Row = {
   dueAt: string | null;
   appointmentAt: string | null;
   note: string | null;
+  representativeName: string | null;
+  representativePhone: string | null;
   representativeNote: string | null;
   status: string;
   companyName: string | null;
@@ -433,6 +435,15 @@ export default function Requests() {
         <td>{row.reference.slice(0, 8)}</td>
         <td>
           <span className="company-name">{row.companyName ?? row.company?.name ?? "غير محدد"}</span>
+          {(row.representativeName || row.representativePhone) && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              المندوب: {row.representativeName ?? ""}
+              {row.representativeName && row.representativePhone ? " — " : ""}
+              {row.representativePhone && (
+                <span dir="ltr">{row.representativePhone}</span>
+              )}
+            </div>
+          )}
           {row.representativeNote && (
             <div className="muted" style={{ fontSize: 11 }}>
               {row.representativeNote}
