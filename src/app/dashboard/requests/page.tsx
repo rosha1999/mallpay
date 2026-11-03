@@ -435,13 +435,14 @@ export default function Requests() {
         <td>{row.reference.slice(0, 8)}</td>
         <td>
           <span className="company-name">{row.companyName ?? row.company?.name ?? "غير محدد"}</span>
-          {(row.representativeName || row.representativePhone) && (
+        </td>
+        <td>
+          {row.representativeName && (
+            <div style={{ fontWeight: 600 }}>{row.representativeName}</div>
+          )}
+          {row.representativePhone && (
             <div className="muted" style={{ fontSize: 12 }}>
-              المندوب: {row.representativeName ?? ""}
-              {row.representativeName && row.representativePhone ? " — " : ""}
-              {row.representativePhone && (
-                <span dir="ltr">{row.representativePhone}</span>
-              )}
+              <span dir="ltr">{row.representativePhone}</span>
             </div>
           )}
           {row.representativeNote && (
@@ -449,6 +450,9 @@ export default function Requests() {
               {row.representativeNote}
             </div>
           )}
+          {!row.representativeName &&
+            !row.representativePhone &&
+            !row.representativeNote && <span className="muted">—</span>}
         </td>
         {showMall && <td>{row.mall?.name ?? "غير محدد"}</td>}
         <td>{money(row.amount)}</td>
@@ -578,20 +582,22 @@ export default function Requests() {
           <div className="tablewrap">
             <table className="reqtable">
               <colgroup>
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "10%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "12%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "17%" }} />
                 <col style={{ width: "9%" }} />
-                <col style={{ width: "20%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "16%" }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>رقم الطلب</th>
                   <th>الشركة</th>
                   <th>المول</th>
+                  <th>المندوب</th>
                   <th>المطلوب</th>
                   <th>المدفوع</th>
                   <th>موعد الاستلام</th>
@@ -601,7 +607,7 @@ export default function Requests() {
               </thead>
               <tbody>
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
+                  <td colSpan={9} style={{ textAlign: "center", padding: 30 }}>
                     جارٍ تحميل الطلبات…
                   </td>
                 </tr>
@@ -622,18 +628,20 @@ export default function Requests() {
               >
                 <table className="reqtable">
                   <colgroup>
-                    <col style={{ width: "8%" }} />
-                    <col style={{ width: "27%" }} />
-                    <col style={{ width: "12%" }} />
-                    <col style={{ width: "12%" }} />
-                    <col style={{ width: "13%" }} />
-                    <col style={{ width: "9%" }} />
+                    <col style={{ width: "7%" }} />
                     <col style={{ width: "19%" }} />
+                    <col style={{ width: "15%" }} />
+                    <col style={{ width: "11%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "18%" }} />
                   </colgroup>
                   <thead>
                     <tr>
                       <th>رقم الطلب</th>
                       <th>الشركة</th>
+                      <th>المندوب</th>
                       <th>المطلوب</th>
                       <th>المدفوع</th>
                       <th>موعد الاستلام</th>
@@ -646,7 +654,7 @@ export default function Requests() {
                     {!box.rows.length && (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={8}
                           style={{ textAlign: "center", padding: 30 }}
                         >
                           لا توجد طلبات مطابقة لهذا المول
@@ -663,11 +671,23 @@ export default function Requests() {
         <section className="panel">
           <div className="tablewrap">
             <table className="reqtable">
+              <colgroup>
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "17%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "16%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>رقم الطلب</th>
                   <th>الشركة</th>
                   <th>المول</th>
+                  <th>المندوب</th>
                   <th>المطلوب</th>
                   <th>المدفوع</th>
                   <th>موعد الاستلام</th>
@@ -679,7 +699,7 @@ export default function Requests() {
                 {rows.map((row) => renderRow(row, true))}
                 {!rows.length && (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: 30 }}>
+                    <td colSpan={9} style={{ textAlign: "center", padding: 30 }}>
                       لا توجد طلبات في هذه الحالة
                     </td>
                   </tr>
