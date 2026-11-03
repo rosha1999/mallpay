@@ -589,13 +589,16 @@ export default function Requests() {
           </div>
         </section>
       ) : malls.length ? (
-        <div className="mallgrid">
+        <div className="mallgrid" style={{ gridTemplateColumns: "1fr" }}>
           {boxes.map((box) => (
             <section className="panel" key={box.key}>
               <div className="panelhead">
                 <h2>{box.title}</h2>
               </div>
-              <div className="tablewrap">
+              <div
+                className="tablewrap"
+                style={{ maxHeight: "none", overflowY: "visible" }}
+              >
                 <table>
                   <thead>
                     <tr>
