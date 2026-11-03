@@ -603,3 +603,20 @@ button:disabled {
     min-width: 220px;
   }
 }
+
+/* Requests page: compact fixed-layout tables that always fit the box width
+   (no horizontal scrolling), with a more prominent company name. */
+.reqtable {
+  table-layout: fixed;
+}
+.reqtable th,
+.reqtable td {
+  padding: 7px 8px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.reqtable .company-name {
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}

@@ -432,7 +432,7 @@ export default function Requests() {
       >
         <td>{row.reference.slice(0, 8)}</td>
         <td>
-          {row.companyName ?? row.company?.name ?? "غير محدد"}
+          <span className="company-name">{row.companyName ?? row.company?.name ?? "غير محدد"}</span>
           {row.representativeNote && (
             <div className="muted" style={{ fontSize: 11 }}>
               {row.representativeNote}
@@ -565,7 +565,17 @@ export default function Requests() {
       {loading ? (
         <section className="panel">
           <div className="tablewrap">
-            <table>
+            <table className="reqtable">
+              <colgroup>
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "20%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>رقم الطلب</th>
@@ -599,7 +609,16 @@ export default function Requests() {
                 className="tablewrap"
                 style={{ maxHeight: "none", overflowY: "visible" }}
               >
-                <table>
+                <table className="reqtable">
+                  <colgroup>
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "27%" }} />
+                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "13%" }} />
+                    <col style={{ width: "9%" }} />
+                    <col style={{ width: "19%" }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>رقم الطلب</th>
@@ -632,7 +651,7 @@ export default function Requests() {
       ) : (
         <section className="panel">
           <div className="tablewrap">
-            <table>
+            <table className="reqtable">
               <thead>
                 <tr>
                   <th>رقم الطلب</th>
