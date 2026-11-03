@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/dashboard", label: "⌂　الرئيسية" },
   { href: "/dashboard/requests", label: "▣　الطلبات الجديدة" },
+  { href: "/dashboard/payments", label: "💰　المدفوعات" },
+  { href: "/dashboard/received", label: "✅　المستلمة" },
   { href: "/dashboard/delete-requests", label: "🗑　حذف الطلبات" },
   { href: "/dashboard/notifications", label: "▤　الإشعارات" },
   { href: "/dashboard/calendar", label: "▦　المواعيد" },

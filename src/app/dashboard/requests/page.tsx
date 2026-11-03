@@ -31,15 +31,6 @@ type RequestPage = { rows: Row[]; total: number; page: number; pageCount: number
 type Mall = { id: string; name: string };
 type RequestBox = { key: string; title: string; rows: Row[] };
 
-const statuses = [
-  ["PENDING", "طلب جديد"],
-  ["APPROVED", "تم تحديد الموعد"],
-  ["RESCHEDULED", "أعيدت الجدولة"],
-  ["REJECTED", "مرفوض"],
-  ["PAID", "مدفوع"],
-  ["CANCELLED", "ملغى"],
-] as const;
-
 function useModalFocus(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
@@ -129,7 +120,7 @@ export default function Requests() {
   const [paymentKey, setPaymentKey] = useState("");
   const paymentKeyRef = useRef("");
   const [retryLocked, setRetryLocked] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const statusFilter = "PENDING";
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
@@ -541,32 +532,8 @@ export default function Requests() {
 
   return (
     <>
-      <h2 className="title">طلبات التسديد</h2>
+      <h2 className="title">الطلبات الجديدة</h2>
       <p className="muted">راجع المبلغ أولاً، ثم حدّد موعد الاستلام بنفسك.</p>
-      <div className="requests-toolbar">
-        <label htmlFor="request-status">تصفية الحالة</label>
-        <select
-          id="request-status"
-          value={statusFilter}
-          disabled={busy || loading}
-          onChange={(event) => {
-            setRows([]);
-            setTotalRows(0);
-            setPageCount(1);
-            setError("");
-            setLoading(true);
-            setPage(1);
-            setStatusFilter(event.target.value);
-          }}
-        >
-          <option value="ALL">كل الطلبات</option>
-          {statuses.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
       {error && (
         <p className="error" role="alert">
           {error}

@@ -70,13 +70,25 @@ export async function GET(request: NextRequest) {
   if (auth.response) return auth.response;
 
   const statusParam = request.nextUrl.searchParams.get("status");
-  const parsedStatus = statusSchema.safeParse(statusParam);
-  if (statusParam && !parsedStatus.success) {
+  const statusValues = statusParam
+    ? statusParam.split(",").map((value) => value.trim())
+    : [];
+  const parsedStatuses = statusValues.map((value) =>
+    statusSchema.safeParse(value),
+  );
+  if (
+    statusParam &&
+    (statusValues.length === 0 ||
+      parsedStatuses.some((parsed) => !parsed.success))
+  ) {
     return NextResponse.json(
       { error: "حالة الطلب غير صحيحة" },
       { status: 400 },
     );
   }
+  const statusList = parsedStatuses.flatMap((parsed) =>
+    parsed.success ? [parsed.data] : [],
+  );
 
   const mallId = request.nextUrl.searchParams.get("mallId");
   const companyId = request.nextUrl.searchParams.get("companyId");
@@ -86,9 +98,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "رقم الصفحة غير صالح" }, { status: 400 });
 
   const where = {
-    ...(parsedStatus.success && statusParam
-      ? { status: parsedStatus.data }
-      : {}),
+    ...(statusList.length === 1
+      ? { status: statusList[0] }
+      : statusList.length > 1
+        ? { status: { in: statusList } }
+        : {}),
     ...(mallId ? { mallId } : {}),
     ...(companyId ? { companyId } : {}),
   };
