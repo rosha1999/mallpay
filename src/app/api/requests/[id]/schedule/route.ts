@@ -9,6 +9,10 @@ import {
 import { formatBaghdadDateTime } from "@/lib/dates";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { futureAppointmentAtSchema } from "@/lib/appointments";
+import { after } from "next/server";
+import { runNotificationDispatch } from "@/lib/notification-dispatch";
+import { openWaConfig } from "@/lib/openwa";
+import { whatsappApiConfig } from "@/lib/whatsapp";
 const schema = z.object({
   appointmentAt: futureAppointmentAtSchema,
   note: z.string().max(1000).optional(),
@@ -53,7 +57,7 @@ export async function PATCH(
         activeAppointment?.scheduledAt.getTime() === scheduledAt.getTime() &&
         activeAppointment?.note === (body.note ?? null)
       )
-        return { request: existing, queuedWhatsapp: Boolean(recipient) };
+        return { request: existing, queuedWhatsapp: Boolean(recipient), queuedEmail: false };
 
       const changed = await tx.paymentRequest.updateMany({
         where: {
@@ -119,13 +123,26 @@ export async function PATCH(
           metadata: { appointmentAt: scheduledAt.toISOString() },
         },
       });
-      return { request: updated, queuedWhatsapp: Boolean(recipient) };
+      return { request: updated, queuedWhatsapp: Boolean(recipient), queuedEmail: Boolean(existing.company?.email) };
     });
+    if (result.queuedWhatsapp || result.queuedEmail) {
+      // Best-effort immediate send; the dispatch endpoint stays the retry path.
+      after(async () => {
+        try {
+          await runNotificationDispatch();
+        } catch {
+          // Queued notifications remain available to the dispatch endpoint.
+        }
+      });
+    }
+    const whatsappReady = Boolean(openWaConfig() || whatsappApiConfig());
     return NextResponse.json({
       ok: true,
       request: result.request,
       message: result.queuedWhatsapp
-        ? "تم حفظ الموعد وإضافة إشعار WhatsApp إلى قائمة الإرسال. يجب تشغيل العامل وإعداد حساب Meta لإرسال الرسالة فعلياً."
+        ? whatsappReady
+          ? "تم حفظ الموعد وسيتم إرسال إشعار WhatsApp خلال لحظات."
+          : "تم حفظ الموعد وإضافة إشعار WhatsApp إلى قائمة الإرسال. يجب تشغيل العامل وإكمال إعداد الإرسال لإرسال الرسالة فعلياً."
         : "تم حفظ الموعد، لكن لا يوجد رقم هاتف صالح لإرسال إشعار WhatsApp.",
     });
   } catch (error) {

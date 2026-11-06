@@ -1,6 +1,7 @@
 import { emailApiConfig } from "@/lib/email";
 import { isConfiguredSecret } from "@/lib/secrets";
 import { whatsappApiConfig } from "@/lib/whatsapp";
+import { openWaConfig } from "@/lib/openwa";
 
 function isPostgresUrl(value: string | undefined): boolean {
   if (!value) return false;
@@ -36,13 +37,15 @@ export function productionConfigIssues(
     issues.push("APP_URL must be an HTTPS origin");
   }
 
-  if (!whatsappApiConfig(env)) issues.push("WhatsApp API credentials");
-  if (!env.WHATSAPP_TEMPLATE_NAME?.trim())
-    issues.push("WHATSAPP_TEMPLATE_NAME (approved Meta template)");
-  if (!isConfiguredSecret(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN))
-    issues.push("WHATSAPP_WEBHOOK_VERIFY_TOKEN");
-  if (!isConfiguredSecret(env.WHATSAPP_APP_SECRET))
-    issues.push("WHATSAPP_APP_SECRET");
+  if (!openWaConfig(env)) {
+    if (!whatsappApiConfig(env)) issues.push("WhatsApp API credentials");
+    if (!env.WHATSAPP_TEMPLATE_NAME?.trim())
+      issues.push("WHATSAPP_TEMPLATE_NAME (approved Meta template)");
+    if (!isConfiguredSecret(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN))
+      issues.push("WHATSAPP_WEBHOOK_VERIFY_TOKEN");
+    if (!isConfiguredSecret(env.WHATSAPP_APP_SECRET))
+      issues.push("WHATSAPP_APP_SECRET");
+  }
   if (!emailApiConfig(env)) issues.push("EMAIL_API_KEY and EMAIL_FROM");
   return issues;
 }
