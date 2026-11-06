@@ -11,7 +11,7 @@ import {
 import { moneyAmountSchema, toCents } from "@/lib/money";
 import { payloadFingerprint } from "@/lib/idempotency";
 import { normalizePhoneNumber } from "@/lib/phone";
-import { formatBaghdadDateTime } from "@/lib/dates";
+import { appointmentNotificationMessage } from "@/lib/notification-messages";
 import { futureAppointmentAtSchema } from "@/lib/appointments";
 
 const schema = z.object({
@@ -217,6 +217,23 @@ export async function POST(request: NextRequest) {
             note: data.note,
           },
         });
+        const mall = data.mallId
+          ? await tx.mall.findUnique({
+              where: { id: data.mallId },
+              select: { name: true },
+            })
+          : null;
+        const companyRecord = await tx.company.findUnique({
+          where: { id: data.companyId },
+          select: { name: true },
+        });
+        const appointmentMessage = appointmentNotificationMessage({
+          companyName: companyRecord?.name ?? "الشركة",
+          mallName: mall?.name ?? null,
+          amount: paymentRequest.amount,
+          scheduledAt,
+          note: data.note,
+        });
         const recipient = company.phone
           ? normalizePhoneNumber(company.phone)
           : null;
@@ -228,7 +245,7 @@ export async function POST(request: NextRequest) {
               channel: "WHATSAPP",
               deliveryStatus: "QUEUED",
               recipient,
-              message: `تم تحديد موعد طلب ${paymentRequest.reference} بتاريخ ${formatBaghdadDateTime(scheduledAt)}`,
+              message: appointmentMessage,
               dedupeKey: `request:${paymentRequest.id}:appointment:${appointment.id}`,
             },
           });
@@ -240,7 +257,7 @@ export async function POST(request: NextRequest) {
               channel: "EMAIL",
               deliveryStatus: "QUEUED",
               recipient: company.email,
-              message: `تم تحديد موعد طلب ${paymentRequest.reference} بتاريخ ${formatBaghdadDateTime(scheduledAt)}.`,
+              message: appointmentMessage,
               dedupeKey: `request:${paymentRequest.id}:email:appointment:${appointment.id}`,
             },
           });

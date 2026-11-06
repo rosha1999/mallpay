@@ -6,13 +6,13 @@ import {
   readJsonBody,
   requireAdminMutation,
 } from "@/lib/http";
-import { formatBaghdadDateTime } from "@/lib/dates";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { futureAppointmentAtSchema } from "@/lib/appointments";
 import { after } from "next/server";
 import { runNotificationDispatch } from "@/lib/notification-dispatch";
 import { openWaConfig } from "@/lib/openwa";
 import { whatsappApiConfig } from "@/lib/whatsapp";
+import { appointmentNotificationMessage } from "@/lib/notification-messages";
 const schema = z.object({
   appointmentAt: futureAppointmentAtSchema,
   note: z.string().max(1000).optional(),
@@ -89,6 +89,20 @@ export async function PATCH(
           note: body.note,
         },
       });
+      const mallId = existing.mallId ?? existing.company?.mallId ?? null;
+      const mall = mallId
+        ? await tx.mall.findUnique({
+            where: { id: mallId },
+            select: { name: true },
+          })
+        : null;
+      const appointmentMessage = appointmentNotificationMessage({
+        companyName: existing.company?.name ?? existing.companyName ?? "الشركة",
+        mallName: mall?.name ?? null,
+        amount: existing.amount,
+        scheduledAt,
+        note: body.note,
+      });
       if (recipient) {
         await tx.notification.create({
           data: {
@@ -97,7 +111,7 @@ export async function PATCH(
             channel: "WHATSAPP",
             deliveryStatus: "QUEUED",
             recipient,
-            message: `تم تحديد موعد طلب ${existing.reference} بتاريخ ${formatBaghdadDateTime(scheduledAt)}`,
+            message: appointmentMessage,
             dedupeKey: `request:${existing.id}:appointment:${appointment.id}`,
           },
         });
@@ -109,7 +123,7 @@ export async function PATCH(
             channel: "EMAIL",
             deliveryStatus: "QUEUED",
             recipient: existing.company.email,
-            message: `تم تحديد موعد طلب ${existing.reference} بتاريخ ${formatBaghdadDateTime(scheduledAt)}.`,
+            message: appointmentMessage,
             dedupeKey: `request:${existing.id}:email:appointment:${appointment.id}`,
           },
         });

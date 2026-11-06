@@ -8,6 +8,10 @@ import {
   requireAdminMutation,
 } from "@/lib/http";
 import { moneyAmountSchema, toCents } from "@/lib/money";
+import { normalizePhoneNumber } from "@/lib/phone";
+import { after } from "next/server";
+import { runNotificationDispatch } from "@/lib/notification-dispatch";
+import { thankYouNotificationMessage } from "@/lib/notification-messages";
 
 const schema = z.object({
   requestId: z.string().min(1),
@@ -66,7 +70,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const payment = await prisma.$transaction(
+    const result = await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "PaymentRequest" WHERE "id" = ${data.requestId} FOR UPDATE`;
         const paymentRequest = await tx.paymentRequest.findUnique({
@@ -108,11 +112,44 @@ export async function POST(request: NextRequest) {
               totalCents === requestedCents ? "PAID" : paymentRequest.status,
           },
         });
+        let queuedThankyou = false;
         if (totalCents === requestedCents) {
           await tx.appointment.updateMany({
             where: { requestId: paymentRequest.id, status: "SCHEDULED" },
             data: { status: "CANCELLED" },
           });
+          const thankyouRecipient =
+            normalizePhoneNumber(paymentRequest.representativePhone ?? "") ??
+            normalizePhoneNumber(paymentRequest.company?.phone ?? "");
+          const thankyouMallId =
+            paymentRequest.mallId ?? paymentRequest.company?.mallId ?? null;
+          const thankyouMall = thankyouMallId
+            ? await tx.mall.findUnique({
+                where: { id: thankyouMallId },
+                select: { name: true },
+              })
+            : null;
+          if (thankyouRecipient && thankyouMall?.name) {
+            await tx.notification.create({
+              data: {
+                requestId: paymentRequest.id,
+                adminId: auth.admin!.id,
+                channel: "WHATSAPP",
+                deliveryStatus: "QUEUED",
+                recipient: thankyouRecipient,
+                message: thankYouNotificationMessage({
+                  companyName:
+                    paymentRequest.company?.name ??
+                    paymentRequest.companyName ??
+                    "الشركة",
+                  mallName: thankyouMall.name,
+                  note: data.notes,
+                }),
+                dedupeKey: `request:${paymentRequest.id}:paid-thankyou`,
+              },
+            });
+            queuedThankyou = true;
+          }
         }
         await tx.auditLog.create({
           data: {
@@ -135,12 +172,22 @@ export async function POST(request: NextRequest) {
             },
           });
         }
-        return created;
+        return { payment: created, queuedThankyou };
       },
       { isolationLevel: "Serializable" },
     );
 
-    return NextResponse.json(payment, { status: 201 });
+    if (result.queuedThankyou) {
+      // Best-effort immediate send; the dispatch endpoint stays the retry path.
+      after(async () => {
+        try {
+          await runNotificationDispatch();
+        } catch {
+          // Queued notifications remain available to the dispatch endpoint.
+        }
+      });
+    }
+    return NextResponse.json(result.payment, { status: 201 });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
