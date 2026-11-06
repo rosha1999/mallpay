@@ -55,10 +55,17 @@ export async function runNotificationDispatch(): Promise<NotificationDispatchSum
     },
   });
 
+  // Fetch only channels that have a configured provider. Otherwise the
+  // oldest-first batch fills up with notifications that can only be
+  // skipped (e.g. email while email is unconfigured) and newer WhatsApp
+  // notifications behind them never get a turn.
+  const channels: Array<"WHATSAPP" | "EMAIL"> = [];
+  if (useOpenWa || whatsapp) channels.push("WHATSAPP");
+  if (email) channels.push("EMAIL");
   const queued = await prisma.notification.findMany({
     where: {
       deliveryStatus: "QUEUED",
-      channel: { in: ["WHATSAPP", "EMAIL"] },
+      channel: { in: channels },
     },
     orderBy: { createdAt: "asc" },
     take: 20,
