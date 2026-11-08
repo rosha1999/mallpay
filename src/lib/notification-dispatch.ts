@@ -4,6 +4,7 @@ import { whatsappApiConfig, whatsappMessagePayload } from "@/lib/whatsapp";
 import { applyPendingWhatsAppStatusEvents } from "@/lib/whatsapp-events";
 import { emailApiConfig, sendNotificationEmail } from "@/lib/email";
 import {
+  isRetryableOpenWaError,
   openWaConfig,
   resolveOpenWaSessionId,
   sendOpenWaTextMessage,
@@ -21,7 +22,8 @@ export type NotificationDispatchSummary = {
 // Sends queued WHATSAPP/EMAIL notifications. WhatsApp goes through OpenWA
 // when it is configured (OPENWA_*), otherwise through the Meta Cloud API.
 // If the OpenWA gateway cannot be reached, its notifications stay QUEUED
-// for the next run instead of being marked FAILED.
+// for the next run instead of being marked FAILED. The same applies when
+// the gateway answers but its WhatsApp session is not active yet.
 export async function runNotificationDispatch(): Promise<NotificationDispatchSummary> {
   const whatsapp = whatsappApiConfig();
   const email = emailApiConfig();
@@ -73,6 +75,7 @@ export async function runNotificationDispatch(): Promise<NotificationDispatchSum
   let sent = 0,
     failed = 0,
     skipped = 0;
+  let openWaUnavailable = false;
   for (const n of queued) {
     if (n.channel === "IN_APP") {
       skipped++;
@@ -82,6 +85,13 @@ export async function runNotificationDispatch(): Promise<NotificationDispatchSum
       (n.channel === "WHATSAPP" && !useOpenWa && !whatsapp) ||
       (n.channel === "EMAIL" && !email)
     ) {
+      skipped++;
+      continue;
+    }
+    // Once the gateway/session has failed as "not ready" in this run, the
+    // remaining WhatsApp items would fail the same way; leave them queued
+    // and untouched for the next run instead of burning an attempt on each.
+    if (n.channel === "WHATSAPP" && useOpenWa && openWaUnavailable) {
       skipped++;
       continue;
     }
@@ -173,6 +183,23 @@ export async function runNotificationDispatch(): Promise<NotificationDispatchSum
       }
     } catch (e) {
       if (messageRecorded) {
+        skipped++;
+        continue;
+      }
+      if (n.channel === "WHATSAPP" && useOpenWa && isRetryableOpenWaError(e)) {
+        // The gateway or its WhatsApp session is not ready (for example the
+        // session did not come back after the host PC restarted). Return the
+        // notification to the queue so a later run delivers it once the
+        // gateway is back, instead of losing the message as FAILED.
+        await prisma.notification.updateMany({
+          where: { id: n.id, deliveryStatus: "PROCESSING" },
+          data: {
+            deliveryStatus: "QUEUED",
+            lastError:
+              e instanceof Error ? e.message.slice(0, 500) : "OpenWA unavailable",
+          },
+        });
+        openWaUnavailable = true;
         skipped++;
         continue;
       }

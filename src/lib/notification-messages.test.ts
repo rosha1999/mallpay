@@ -15,35 +15,51 @@ describe("formatIqdAmount", () => {
 
 describe("appointmentNotificationMessage", () => {
   const base = {
-    companyName: "الرياح القواس",
-    mallName: "باريس مول فرع 1",
+    companyName: "رياح والأقواس",
+    mallName: "شكار مول",
     amount: 341000,
-    scheduledAt: new Date("2026-11-20T07:00:00.000Z"),
+    // 10:00 in Baghdad.
+    scheduledAt: new Date("2026-11-09T07:00:00.000Z"),
   };
 
-  it("names the company, mall, amount and time without the internal reference", () => {
-    const lines = appointmentNotificationMessage(base).split("\n");
-    expect(lines[0]).toBe("تم تحديد موعد استلام طلبكم لدى MallPay");
-    expect(lines[1]).toBe("الشركة: الرياح القواس");
-    expect(lines[2]).toBe("المول: باريس مول فرع 1");
-    expect(lines[3]).toBe("المبلغ: 341,000 د.ع");
-    expect(lines[4]).toMatch(/^الموعد: /);
-    expect(lines).toHaveLength(5);
+  it("matches the owner's dictated template", () => {
+    expect(appointmentNotificationMessage(base)).toBe(
+      [
+        "السلام عليكم،",
+        "تم تحديد موعد استلام مستحقاتكم المالية:",
+        "🏢 *الشركة:* رياح والأقواس",
+        "🏬 *المول:* شكار مول",
+        "📅 *التاريخ:* 09/11/2026",
+        "🕙 *الوقت:* 10:00 صباحاً",
+        "━━━━━━━━━━━━━━",
+        "🔹 يرجى الالتزام بالموعد، وفي حال التأخير يتم تأجيل الاستلام إلى يوم آخر يحدده المحاسب مباشرةً.",
+        "🔹 يرجى مطابقة الحساب مع محاسب المول والتأكد من المبلغ وعدّه قبل المغادرة.",
+        "🔹 بعد مغادرة المحاسب، لا يتحمل أي مسؤولية عن النقص.",
+        "⚠️ هذه رسالة تلقائية، ورقم الواتساب لا يستقبل الردود أو الاتصالات. يرجى عدم الرد.",
+        "*شكراً لتعاونكم.*",
+      ].join("\n"),
+    );
   });
 
-  it("appends the admin note only when one was written", () => {
-    const withNote = appointmentNotificationMessage({
+  it("formats afternoon Baghdad times with مساءً", () => {
+    const message = appointmentNotificationMessage({
       ...base,
-      note: "  شفه تيسته  ",
-    }).split("\n");
-    expect(withNote[withNote.length - 1]).toBe("ملاحظة: شفه تيسته");
-    const withoutMall = appointmentNotificationMessage({
+      // 13:30 in Baghdad.
+      scheduledAt: new Date("2026-11-09T10:30:00.000Z"),
+    });
+    expect(message).toContain("📅 *التاريخ:* 09/11/2026");
+    expect(message).toContain("🕙 *الوقت:* 1:30 مساءً");
+  });
+
+  it("omits the mall line without a mall and never includes amount or note", () => {
+    const message = appointmentNotificationMessage({
       ...base,
       mallName: null,
-      note: "   ",
-    }).split("\n");
-    expect(withoutMall.some((line) => line.startsWith("المول:"))).toBe(false);
-    expect(withoutMall.some((line) => line.startsWith("ملاحظة:"))).toBe(false);
+      note: "ملاحظة داخلية",
+    });
+    expect(message).not.toContain("🏬");
+    expect(message).not.toContain("341");
+    expect(message).not.toContain("ملاحظة داخلية");
   });
 });
 

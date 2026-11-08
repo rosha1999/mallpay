@@ -95,29 +95,70 @@ export function openWaProviderMessageId(payload: unknown): string | null {
   return null;
 }
 
+export class OpenWaRequestError extends Error {
+  readonly status: number | null;
+
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.name = "OpenWaRequestError";
+    this.status = status;
+  }
+}
+
+// Whether a failed OpenWA call means "not ready right now" (worth retrying
+// on a later run) rather than "this message can never be sent". Covers: no
+// answer at all (network error or timeout), gateway-side 5xx and rate
+// limiting, a session that no longer exists, and a session that exists but
+// is not active — e.g. it did not come back after the host PC restarted.
+export function isRetryableOpenWaError(error: unknown): boolean {
+  if (!(error instanceof OpenWaRequestError)) return false;
+  if (error.status === null) return true;
+  if (error.status >= 500 || error.status === 429 || error.status === 404)
+    return true;
+  if (error.status === 400) {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("not active") ||
+      message.includes("start the session") ||
+      message.includes("not ready") ||
+      message.includes("not connected")
+    );
+  }
+  return false;
+}
+
 async function openWaRequest(
   config: OpenWaConfig,
   path: string,
   init: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(`${config.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      "X-API-Key": config.apiKey,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-    cache: "no-store",
-    signal: AbortSignal.timeout(20_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        "X-API-Key": config.apiKey,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    throw new OpenWaRequestError(
+      `OpenWA request failed: ${e instanceof Error ? e.message : "network error"}`,
+      null,
+    );
+  }
   const data: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const record = asRecord(data);
     const detail =
       (record && (stringField(record, "message") ?? stringField(record, "error"))) ||
       null;
-    throw new Error(
+    throw new OpenWaRequestError(
       `OpenWA HTTP ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      response.status,
     );
   }
   return data;

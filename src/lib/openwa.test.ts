@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isRetryableOpenWaError,
+  OpenWaRequestError,
   openWaChatId,
   openWaConfig,
   openWaProviderMessageId,
@@ -94,5 +96,51 @@ describe("OpenWA helpers", () => {
     expect(openWaProviderMessageId({ messageId: "m-2" })).toBe("m-2");
     expect(openWaProviderMessageId({})).toBeNull();
     expect(openWaProviderMessageId(null)).toBeNull();
+  });
+});
+
+describe("OpenWA error classification", () => {
+  it("treats network failures and gateway-side errors as retryable", () => {
+    expect(
+      isRetryableOpenWaError(
+        new OpenWaRequestError("OpenWA request failed: fetch failed", null),
+      ),
+    ).toBe(true);
+    expect(isRetryableOpenWaError(new OpenWaRequestError("OpenWA HTTP 502", 502))).toBe(
+      true,
+    );
+    expect(isRetryableOpenWaError(new OpenWaRequestError("OpenWA HTTP 429", 429))).toBe(
+      true,
+    );
+    expect(
+      isRetryableOpenWaError(
+        new OpenWaRequestError("OpenWA HTTP 404: Session not found", 404),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an inactive session as retryable", () => {
+    expect(
+      isRetryableOpenWaError(
+        new OpenWaRequestError(
+          "OpenWA HTTP 400: Session 'sess-1' is not active. Start the session first.",
+          400,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats other client errors and unknown errors as final", () => {
+    expect(
+      isRetryableOpenWaError(
+        new OpenWaRequestError("OpenWA HTTP 400: Invalid chat id", 400),
+      ),
+    ).toBe(false);
+    expect(
+      isRetryableOpenWaError(
+        new OpenWaRequestError("OpenWA HTTP 401: Invalid API key", 401),
+      ),
+    ).toBe(false);
+    expect(isRetryableOpenWaError(new Error("boom"))).toBe(false);
   });
 });
